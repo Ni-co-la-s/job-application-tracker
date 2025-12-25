@@ -342,9 +342,9 @@ class JobDatabase:
                 query += " AND j.date_scraped <= ?"
                 params.append(filters["date_to"] + " 23:59:59")
 
-            if filters.get("show_archived") is False:
+            if filters.get("show_archived") == "active":
                 query += " AND j.archived = 0"
-            elif filters.get("show_archived"):
+            elif filters.get("show_archived") == "archived":
                 query += " AND j.archived = 1"
 
         query += " GROUP BY j.id ORDER BY j.date_scraped DESC, j.llm_score DESC"
@@ -409,6 +409,12 @@ class JobDatabase:
             if filters.get("date_to"):
                 count_query += " AND j.date_scraped <= ?"
                 count_params.append(filters["date_to"] + " 23:59:59")
+
+            # Archive filter
+            if filters.get("show_archived") == "active":
+                count_query += " AND j.archived = 0"
+            elif filters.get("show_archived") == "archived":
+                count_query += " AND j.archived = 1"
 
         cursor.execute(count_query, count_params)
         total_count = cursor.fetchone()[0]

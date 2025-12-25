@@ -145,10 +145,10 @@ def main() -> None:
     filters = {"min_score": min_score, "max_score": max_score}
 
     if archive_filter == "Active":
-        filters["show_archived"] = False
+        filters["show_archived"] = "active"
     elif archive_filter == "Archived":
-        filters["show_archived"] = True
-    else:  # "All"
+        filters["show_archived"] = "archived"
+    else:
         filters["show_archived"] = "all"
 
     if website_filter:  # Only filter if user selected specific sites
