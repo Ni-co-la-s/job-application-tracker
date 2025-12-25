@@ -1,0 +1,17 @@
+{
+  "salary_research": {
+    "name": "Salary Research",
+    "system_prompt": "",
+    "user_prompt": "Research typical salary for {title} at {company} in {location} with 2 years experience."
+  },
+  "application_strategy": {
+    "name": "Application Strategy",
+    "system_prompt": "",
+    "user_prompt": "Analyze {title} at {company}:\n{description}\n\nSuggest which experiences to emphasize."
+  },
+  "Cover Letter Help": {
+    "name": "Cover Letter Help",
+    "system_prompt": "You are a career advisor helping with cover letters.",
+    "user_prompt": "Write me a cover letter for:\n\nTitle: {title}\nCompany: {company}\nDescription : {description}\n"
+  }
+}

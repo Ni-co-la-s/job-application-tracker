@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# uv
+uv.lock
+
+# Database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Output files
+*.html
+*.csv
+
+# Environment variables
+.env
+
+# User configuration (keep .example files)
+config/*.txt
+
+# User data
+Resumes/final/*.pdf
+CoverLetters/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+migrations.py
+test.py
+compare.py
