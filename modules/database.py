@@ -280,6 +280,7 @@ class JobDatabase:
         filters: dict[str, Any] | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """Get jobs with optional filters and pagination.
 
@@ -287,6 +288,7 @@ class JobDatabase:
             filters: Dictionary of filter criteria.
             limit: Maximum number of jobs to return.
             offset: Number of jobs to skip.
+            sort_by: Sorting option (e.g., "date_desc", "date_asc", "score_desc", "score_asc").
 
         Returns:
             Tuple of (list of job dictionaries, total count).
@@ -347,7 +349,19 @@ class JobDatabase:
             elif filters.get("show_archived") == "archived":
                 query += " AND j.archived = 1"
 
-        query += " GROUP BY j.id ORDER BY j.date_scraped DESC, j.llm_score DESC"
+
+        query += " GROUP BY j.id"
+
+        if sort_by == "date_desc":
+            query += " ORDER BY j.date_scraped DESC"
+        elif sort_by == "date_asc":
+            query += " ORDER BY j.date_scraped ASC"
+        elif sort_by == "score_desc":
+            query += " ORDER BY j.llm_score DESC"
+        elif sort_by == "score_asc":
+            query += " ORDER BY j.llm_score ASC"
+        else:
+            query += " ORDER BY j.date_scraped DESC, j.llm_score DESC"
 
         # Add pagination if specified
         if limit is not None:

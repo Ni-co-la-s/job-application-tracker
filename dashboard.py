@@ -178,25 +178,24 @@ def main() -> None:
         st.session_state.page_size = page_size
         st.session_state.current_page = 1
 
-    # Get jobs with pagination
+    # Map UI sorting options to database sorting parameters
+    sort_mapping = {
+        "Date (Newest First)": "date_desc",
+        "Date (Oldest First)": "date_asc",
+        "Score (Highest First)": "score_desc",
+        "Score (Lowest First)": "score_asc",
+    }
+    db_sort_by = sort_mapping.get(sort_by)
+
+    # Get jobs with pagination and sorting
     try:
         offset = (st.session_state.current_page - 1) * st.session_state.page_size
         jobs, total_count = db.get_all_jobs(
-            filters, limit=st.session_state.page_size, offset=offset
+            filters, 
+            limit=st.session_state.page_size, 
+            offset=offset,
+            sort_by=db_sort_by
         )
-
-        # Apply sorting
-        if jobs:
-            if sort_by == "Date (Newest First)":
-                jobs = sorted(
-                    jobs, key=lambda j: j.get("date_scraped") or "", reverse=True
-                )
-            elif sort_by == "Date (Oldest First)":
-                jobs = sorted(jobs, key=lambda j: j.get("date_scraped") or "")
-            elif sort_by == "Score (Highest First)":
-                jobs = sorted(jobs, key=lambda j: j.get("llm_score") or 0, reverse=True)
-            elif sort_by == "Score (Lowest First)":
-                jobs = sorted(jobs, key=lambda j: j.get("llm_score") or 0)
     except Exception as e:
         st.sidebar.error(f"⚠️ Error loading jobs: {e}")
         import traceback
