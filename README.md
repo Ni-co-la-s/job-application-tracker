@@ -95,6 +95,7 @@ The system relies on several plain-text files in the `config/` directory to pers
 - **candidate_skills.txt**: A list of your primary technical skills (one per line). The skills extracted from the jobs will then be matched to them.
 - **prompts.json**: Contains the prompts for extraction and scoring logic. 
 - **presets.json**: Saved prompt templates for the AI Chat interface. Those can be changed from the UI directly
+- **interview_stages.json**: Customizable interview stages for tracking application stages (refusal, offers, phone screening...). You can modify, add, or remove stages to match your interview process.
 
 ## Usage
 

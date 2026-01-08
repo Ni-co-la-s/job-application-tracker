@@ -8,6 +8,10 @@ import streamlit as st
 
 import constants
 from modules.database import JobDatabase
+from modules.interview_stages_loader import (
+    get_stage_options,
+    format_stage_option,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -332,32 +336,8 @@ def render_job_browser(
                                 st.write("**Add Interview Stage**")
                                 new_stage = st.selectbox(
                                     "Stage",
-                                    [
-                                        "",
-                                        "no_response",
-                                        "automatic_rejection",
-                                        "phone_screen",
-                                        "technical_interview",
-                                        "behavioral_interview",
-                                        "final_interview",
-                                        "offer_received",
-                                        "offer_accepted",
-                                        "offer_declined",
-                                        "rejected",
-                                    ],
-                                    format_func=lambda x: {
-                                        "": "Select stage...",
-                                        "no_response": "📭 No Response",
-                                        "automatic_rejection": "❌ Automatic Rejection",
-                                        "phone_screen": "📞 Phone Screen",
-                                        "technical_interview": "💻 Technical Interview",
-                                        "behavioral_interview": "🤝 Behavioral Interview",
-                                        "final_interview": "🎯 Final Interview",
-                                        "offer_received": "🎉 Offer Received",
-                                        "offer_accepted": "✅ Offer Accepted",
-                                        "offer_declined": "❌ Offer Declined",
-                                        "rejected": "😞 Rejected After Interview",
-                                    }.get(x, x),
+                                    get_stage_options(),
+                                    format_func=format_stage_option,
                                     key=f"stage_select_{job['id']}",
                                 )
                                 stage_notes = st.text_area(

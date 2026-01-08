@@ -1,0 +1,54 @@
+{
+    "stages": [
+        {
+            "id": "no_response",
+            "label": "📭 No Response",
+            "order": 1
+        },
+        {
+            "id": "automatic_rejection",
+            "label": "❌ Automatic Rejection",
+            "order": 2
+        },
+        {
+            "id": "phone_screen",
+            "label": "📞 Phone Screen",
+            "order": 3
+        },
+        {
+            "id": "technical_interview",
+            "label": "💻 Technical Interview",
+            "order": 4
+        },
+        {
+            "id": "behavioral_interview",
+            "label": "🤝 Behavioral Interview",
+            "order": 5
+        },
+        {
+            "id": "final_interview",
+            "label": "🎯 Final Interview",
+            "order": 6
+        },
+        {
+            "id": "offer_received",
+            "label": "🎉 Offer Received",
+            "order": 7
+        },
+        {
+            "id": "offer_accepted",
+            "label": "✅ Offer Accepted",
+            "order": 8
+        },
+        {
+            "id": "offer_declined",
+            "label": "❌ Offer Declined",
+            "order": 9
+        },
+        {
+            "id": "rejected",
+            "label": "😞 Rejected After Interview",
+            "order": 10
+        }
+    ]
+}

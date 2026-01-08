@@ -58,6 +58,7 @@ def startup_check() -> bool:
         ("config/resume.txt", "resume text file"),
         ("config/candidate_skills.txt", "candidate skills text file"),
         ("config/searches.txt", "searches text file"),
+        ("config/interview_stages.json", "interview stages configuration"),
     ]
 
     missing_files = []
@@ -191,10 +192,7 @@ def main() -> None:
     try:
         offset = (st.session_state.current_page - 1) * st.session_state.page_size
         jobs, total_count = db.get_all_jobs(
-            filters, 
-            limit=st.session_state.page_size, 
-            offset=offset,
-            sort_by=db_sort_by
+            filters, limit=st.session_state.page_size, offset=offset, sort_by=db_sort_by
         )
     except Exception as e:
         st.sidebar.error(f"⚠️ Error loading jobs: {e}")

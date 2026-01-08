@@ -349,7 +349,6 @@ class JobDatabase:
             elif filters.get("show_archived") == "archived":
                 query += " AND j.archived = 1"
 
-
         query += " GROUP BY j.id"
 
         if sort_by == "date_desc":
