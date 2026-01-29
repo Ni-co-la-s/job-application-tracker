@@ -104,7 +104,7 @@ def main() -> None:
     # Website filter
     website_filter = st.sidebar.multiselect(
         "Job Sites",
-        options=["indeed", "linkedin", "glassdoor", "zip_recruiter", "google"],
+        options=["indeed", "linkedin", "glassdoor", "zip_recruiter", "google", "other"],
         default=[],  # Empty = all sites
     )
 
@@ -332,6 +332,7 @@ def main() -> None:
                         "glassdoor": "🏢",
                         "zip_recruiter": "📨",
                         "google": "🔍",
+                        "other": "📝",
                     }.get(site.lower() if site else "", "🌐")
                     st.write(f"{site_emoji} {site or 'Unknown'}: {count}")
 

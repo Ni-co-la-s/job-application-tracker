@@ -304,7 +304,7 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
 
                         # Update button for this stage
                         if st.button(
-                            f"💾 Update Stage", key=f"update_stage_{stage['id']}"
+                            "💾 Update Stage", key=f"update_stage_{stage['id']}"
                         ):
                             try:
                                 updates = {

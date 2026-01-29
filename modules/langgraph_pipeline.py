@@ -789,3 +789,100 @@ def run_batch_through_pipeline(
     return asyncio.run(
         pipeline.process_batch(jobs, min_score, batch_size, heuristic_threshold)
     )
+
+
+async def process_single_job_async(
+    job_data: Dict[str, Any],
+    min_score: int = 0,
+    heuristic_threshold: float = 0.35,
+) -> Dict[str, Any]:
+    """
+    Process a single job through the pipeline asynchronously.
+
+    Args:
+        job_data: Job dictionary with all required fields
+        min_score: Minimum score to save (default: 0)
+        heuristic_threshold: Heuristic score threshold for filtering (default: 0.35)
+
+    Returns:
+        Dictionary with processed job data including pipeline results
+    """
+    # Add pipeline parameters to job data
+    job_data["_min_score"] = min_score
+    job_data["_heuristic_threshold"] = heuristic_threshold
+
+    # Create initial state
+    initial_state = {
+        "job_data": job_data,
+        "job_hash": None,
+        "is_duplicate": False,
+        "extracted_skills": None,
+        "match_result": None,
+        "heuristic_score": None,
+        "llm_score": None,
+        "llm_reasoning": None,
+        "error": None,
+        "should_continue": True,
+    }
+
+    # Create pipeline and process job
+    pipeline = LangGraphPipeline()
+    try:
+        final_state = await pipeline.workflow.ainvoke(initial_state)
+
+        # Extract results
+        result = {
+            "job_data": job_data,
+            "job_hash": final_state.get("job_hash"),
+            "is_duplicate": final_state.get("is_duplicate", False),
+            "extracted_skills": final_state.get("extracted_skills", []),
+            "match_result": final_state.get("match_result"),
+            "heuristic_score": final_state.get("heuristic_score", 0.0),
+            "llm_score": final_state.get("llm_score", 0),
+            "llm_reasoning": final_state.get("llm_reasoning", ""),
+            "error": final_state.get("error"),
+            "should_continue": final_state.get("should_continue", False),
+            "status": "processed",
+        }
+
+        # Check if job was saved
+        if not final_state.get("is_duplicate", False) and final_state.get(
+            "should_continue", False
+        ):
+            if final_state.get("llm_score", 0) >= min_score:
+                result["status"] = "accepted"
+            else:
+                result["status"] = "low_score"
+        elif final_state.get("is_duplicate", False):
+            result["status"] = "duplicate"
+        elif final_state.get("error"):
+            result["status"] = "error"
+        elif not final_state.get("should_continue", False):
+            result["status"] = "rejected"
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error processing single job: {e}")
+        return {"job_data": job_data, "error": str(e), "status": "error"}
+
+
+def process_single_job(
+    job_data: Dict[str, Any],
+    min_score: int = 0,
+    heuristic_threshold: float = 0.35,
+) -> Dict[str, Any]:
+    """
+    Synchronous wrapper for processing a single job.
+
+    Args:
+        job_data: Job dictionary with all required fields
+        min_score: Minimum score to save (default: 0)
+        heuristic_threshold: Heuristic score threshold for filtering (default: 0.35)
+
+    Returns:
+        Dictionary with processed job data including pipeline results
+    """
+    return asyncio.run(
+        process_single_job_async(job_data, min_score, heuristic_threshold)
+    )

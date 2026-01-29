@@ -14,6 +14,7 @@ from modules.interview_stages_loader import (
     format_stage_option,
 )
 from tabs.job_edit_panel import render_edit_panel
+from tabs.add_job_panel import render_add_job_panel
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +51,28 @@ def render_job_browser(
 
     if "editing_job_id" not in st.session_state:
         st.session_state.editing_job_id = None
+    if "adding_job" not in st.session_state:
+        st.session_state.adding_job = False
 
     st.title("🎯 Job Application Tracker")
 
+    # Check if we're in add mode
+    if st.session_state.adding_job:
+        render_add_job_panel(db)
+        return
+
+    # Check if we're in edit mode
     if st.session_state.editing_job_id is not None:
         # Show full-width edit panel
         render_edit_panel(db, st.session_state.editing_job_id, jobs)
         return  # Skip normal job browser view
+
+    # Add Job button at the top
+    col_add, col_pagination = st.columns([1, 4])
+    with col_add:
+        if st.button("➕ Add Job Manually", type="primary", use_container_width=True):
+            st.session_state.adding_job = True
+            st.rerun()
 
     # Pagination controls
     st.subheader("📄 Pagination")
@@ -227,6 +243,7 @@ def render_job_browser(
                 "glassdoor": "🏢",
                 "zip_recruiter": "📨",
                 "google": "🔍",
+                "other": "📝",
             }.get(job.get("site", "").lower(), "🌐")
 
             # Create clickable header for selection
