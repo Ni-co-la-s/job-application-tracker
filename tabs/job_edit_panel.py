@@ -84,8 +84,8 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
                     date_posted_value = datetime.datetime.strptime(
                         job["date_posted"], "%Y-%m-%d"
                     ).date()
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse date_posted: {e}")
             date_posted = st.date_input(
                 "Date Posted", value=date_posted_value, key="edit_date_posted"
             )
@@ -225,8 +225,9 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
                     app_date_value = datetime.datetime.strptime(
                         application["application_date"][:10], "%Y-%m-%d"
                     ).date()
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse application_date: {e}")
+
             application_date = st.date_input(
                 "Application Date", value=app_date_value, key="edit_app_date"
             )
@@ -288,8 +289,8 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
                                 stage_date_value = datetime.datetime.strptime(
                                     stage["stage_date"][:10], "%Y-%m-%d"
                                 ).date()
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.warning(f"Failed to parse stage_date: {e}")
                         new_stage_date = st.date_input(
                             "Stage Date",
                             value=stage_date_value,
