@@ -235,6 +235,7 @@ class JobDatabase:
         resume_path: str,
         cover_letter_path: str | None = None,
         notes: str | None = None,
+        application_date: str | None = None,
     ) -> None:
         """Mark a job as applied.
 
@@ -244,19 +245,44 @@ class JobDatabase:
             resume_path: Path to the resume file.
             cover_letter_path: Optional path to cover letter file.
             notes: Optional application notes.
+            application_date: Optional application date (YYYY-MM-DD format).
+                             If None, uses current timestamp.
         """
         cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO applications (job_id, resume_version, resume_file_path, cover_letter_path, notes)
-            VALUES (?, ?, ?, ?, ?)
-        """,
-            (job_id, resume_version, resume_path, cover_letter_path, notes),
-        )
+
+        if application_date:
+            cursor.execute(
+                """
+                INSERT INTO applications (job_id, resume_version, resume_file_path, 
+                                        cover_letter_path, notes, application_date)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    job_id,
+                    resume_version,
+                    resume_path,
+                    cover_letter_path,
+                    notes,
+                    application_date,
+                ),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO applications (job_id, resume_version, resume_file_path, 
+                                        cover_letter_path, notes)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (job_id, resume_version, resume_path, cover_letter_path, notes),
+            )
         self.conn.commit()
 
     def add_interview_stage(
-        self, job_id: int, stage: str, notes: str | None = None
+        self,
+        job_id: int,
+        stage: str,
+        notes: str | None = None,
+        stage_date: str | None = None,
     ) -> None:
         """Add an interview stage for a job.
 
@@ -264,15 +290,27 @@ class JobDatabase:
             job_id: ID of the job.
             stage: Interview stage (e.g., 'phone_screen', 'technical_interview').
             notes: Optional notes about the interview stage.
+            stage_date: Optional stage date (YYYY-MM-DD format).
+                       If None, uses current timestamp.
         """
         cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO interview_stages (job_id, stage, notes)
-            VALUES (?, ?, ?)
-        """,
-            (job_id, stage, notes),
-        )
+
+        if stage_date:
+            cursor.execute(
+                """
+                INSERT INTO interview_stages (job_id, stage, notes, stage_date)
+                VALUES (?, ?, ?, ?)
+            """,
+                (job_id, stage, notes, stage_date),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO interview_stages (job_id, stage, notes)
+                VALUES (?, ?, ?)
+            """,
+                (job_id, stage, notes),
+            )
         self.conn.commit()
 
     def get_all_jobs(
@@ -464,3 +502,193 @@ class JobDatabase:
         return sqlite3.connect(
             f"file:{self.db_path}?mode=ro", uri=True, check_same_thread=False
         )
+
+    def get_job_by_id(self, job_id: int) -> dict[str, Any] | None:
+        """Get a single job by ID.
+
+        Args:
+            job_id: ID of the job to fetch.
+
+        Returns:
+            Job dictionary or None if not found.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        row = cursor.fetchone()
+
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+        return None
+
+    def get_application_by_job_id(self, job_id: int) -> dict[str, Any] | None:
+        """Get application data for a job.
+
+        Args:
+            job_id: ID of the job.
+
+        Returns:
+            Application dictionary or None if not found.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM applications WHERE job_id = ?", (job_id,))
+        row = cursor.fetchone()
+
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+        return None
+
+    def get_interview_stages_by_job_id(self, job_id: int) -> list[dict[str, Any]]:
+        """Get all interview stages for a job.
+
+        Args:
+            job_id: ID of the job.
+
+        Returns:
+            List of interview stage dictionaries.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM interview_stages WHERE job_id = ? ORDER BY stage_date",
+            (job_id,),
+        )
+
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def update_job(self, job_id: int, updates: dict[str, Any]) -> None:
+        """Update editable job fields.
+
+        Args:
+            job_id: ID of the job to update.
+            updates: Dictionary of field names and values to update.
+        """
+        if not updates:
+            return
+
+        # Only allow updating editable fields
+        editable_fields = {
+            "title",
+            "company",
+            "location",
+            "job_type",
+            "description",
+            "min_amount",
+            "max_amount",
+            "currency",
+            "interval",
+            "job_url",
+            "job_url_direct",
+            "site",
+            "date_posted",
+            "salary_source",
+            "company_industry",
+            "company_url",
+            "company_logo",
+            "company_url_direct",
+            "company_addresses",
+            "company_num_employees",
+            "company_revenue",
+            "company_description",
+            "job_level",
+            "job_function",
+            "is_remote",
+        }
+
+        # Filter to only editable fields
+        filtered_updates = {k: v for k, v in updates.items() if k in editable_fields}
+
+        if not filtered_updates:
+            return
+
+        # Build update query
+        set_clause = ", ".join([f"{field} = ?" for field in filtered_updates.keys()])
+        values = list(filtered_updates.values()) + [job_id]
+
+        cursor = self.conn.cursor()
+        cursor.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
+        self.conn.commit()
+
+    def update_application(self, job_id: int, updates: dict[str, Any]) -> None:
+        """Update application fields.
+
+        Args:
+            job_id: ID of the job.
+            updates: Dictionary of field names and values to update.
+        """
+        if not updates:
+            return
+
+        cursor = self.conn.cursor()
+
+        # Check if application exists
+        cursor.execute("SELECT id FROM applications WHERE job_id = ?", (job_id,))
+        existing = cursor.fetchone()
+
+        if existing:
+            # Update existing application
+            editable_fields = {
+                "application_date",
+                "resume_version",
+                "resume_file_path",
+                "cover_letter_path",
+                "notes",
+            }
+            filtered_updates = {
+                k: v for k, v in updates.items() if k in editable_fields
+            }
+
+            if filtered_updates:
+                set_clause = ", ".join(
+                    [f"{field} = ?" for field in filtered_updates.keys()]
+                )
+                values = list(filtered_updates.values()) + [job_id]
+                cursor.execute(
+                    f"UPDATE applications SET {set_clause} WHERE job_id = ?", values
+                )
+                self.conn.commit()
+        else:
+            # Create new application if it doesn't exist
+            fields = ["job_id"] + list(updates.keys())
+            placeholders = ", ".join(["?" for _ in fields])
+            values = [job_id] + list(updates.values())
+
+            cursor.execute(
+                f"INSERT INTO applications ({', '.join(fields)}) VALUES ({placeholders})",
+                values,
+            )
+            self.conn.commit()
+
+    def update_interview_stage(self, stage_id: int, updates: dict[str, Any]) -> None:
+        """Update an interview stage.
+
+        Args:
+            stage_id: ID of the stage to update.
+            updates: Dictionary of field names and values to update.
+        """
+        if not updates:
+            return
+
+        editable_fields = {"stage", "stage_date", "notes"}
+        filtered_updates = {k: v for k, v in updates.items() if k in editable_fields}
+
+        if not filtered_updates:
+            return
+
+        set_clause = ", ".join([f"{field} = ?" for field in filtered_updates.keys()])
+        values = list(filtered_updates.values()) + [stage_id]
+
+        cursor = self.conn.cursor()
+        cursor.execute(f"UPDATE interview_stages SET {set_clause} WHERE id = ?", values)
+        self.conn.commit()
+
+    def delete_interview_stage(self, stage_id: int) -> None:
+        """Delete an interview stage.
+
+        Args:
+            stage_id: ID of the stage to delete.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM interview_stages WHERE id = ?", (stage_id,))
+        self.conn.commit()

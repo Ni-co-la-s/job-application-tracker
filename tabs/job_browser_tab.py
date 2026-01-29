@@ -1,5 +1,6 @@
 """Job Browser tab for viewing and managing job applications."""
 
+import datetime
 import logging
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from modules.interview_stages_loader import (
     get_stage_options,
     format_stage_option,
 )
+from tabs.job_edit_panel import render_edit_panel
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,15 @@ def render_job_browser(
         total_count: Total number of jobs matching filters.
     """
 
+    if "editing_job_id" not in st.session_state:
+        st.session_state.editing_job_id = None
+
     st.title("🎯 Job Application Tracker")
+
+    if st.session_state.editing_job_id is not None:
+        # Show full-width edit panel
+        render_edit_panel(db, st.session_state.editing_job_id, jobs)
+        return  # Skip normal job browser view
 
     # Pagination controls
     st.subheader("📄 Pagination")
@@ -343,10 +353,18 @@ def render_job_browser(
                                 stage_notes = st.text_area(
                                     "Notes", key=f"stage_notes_{job['id']}"
                                 )
+                                # Stage date picker
+                                stage_date = st.date_input(
+                                    "Stage Date",
+                                    value=datetime.date.today(),
+                                    key=f"stage_date_{job['id']}",
+                                )
                                 if st.form_submit_button("Add Stage"):
                                     if new_stage:
+                                        # Convert date to string format for database
+                                        date_str = stage_date.strftime("%Y-%m-%d")
                                         db.add_interview_stage(
-                                            job["id"], new_stage, stage_notes
+                                            job["id"], new_stage, stage_notes, date_str
                                         )
                                         st.toast("Stage added!")
                                         st.rerun()
@@ -394,18 +412,28 @@ def render_job_browser(
                                     "Application Notes", key=f"notes_{job['id']}"
                                 )
 
+                                # Application date picker
+                                application_date = st.date_input(
+                                    "Application Date",
+                                    value=datetime.date.today(),
+                                    key=f"date_{job['id']}",
+                                )
+
                                 # Submit button
                                 submit_disabled = not available_resumes
                                 if st.form_submit_button(
                                     "Mark Applied", disabled=submit_disabled
                                 ):
                                     if selected_resume:
+                                        # Convert date to string format for database
+                                        date_str = application_date.strftime("%Y-%m-%d")
                                         db.mark_applied(
                                             job["id"],
                                             resume_version,
                                             resume_full_path,
                                             cover_letter_path,
                                             notes,
+                                            date_str,
                                         )
                                         st.toast("Marked as applied!")
                                         st.rerun()
@@ -413,6 +441,12 @@ def render_job_browser(
                     with col3:
                         st.write("")
                         st.write("")
+                        if st.button(
+                            "✏️", key=f"edit_{job['id']}", help="Edit this job"
+                        ):
+                            st.session_state.editing_job_id = job["id"]
+                            st.rerun()
+
                         if st.button(
                             "📦", key=f"archive_{job['id']}", help="Archive this job"
                         ):
