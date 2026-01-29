@@ -454,7 +454,7 @@ async def job_scoring(state: PipelineState) -> PipelineState:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=1000,
+            max_tokens=3000,
         )
 
         content = response.choices[0].message.content
