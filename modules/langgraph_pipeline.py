@@ -636,9 +636,12 @@ class LangGraphPipeline:
                 f"\n--- Chunk {chunk_idx}/{num_chunks} ({len(job_chunk)} jobs) ---"
             )
 
-            # Prepare initial states for all jobs in chunk
-            initial_states = []
-            for job in job_chunk:
+            # Keep result order aligned with the original job order in this chunk
+            chunk_results = [None] * len(job_chunk)
+
+            # Prepare initial states for all non-duplicate jobs in chunk, while retaining their original index
+            indexed_states = []
+            for idx, job in enumerate(job_chunk):
                 job["_min_score"] = min_score
                 job["_heuristic_threshold"] = heuristic_threshold
 
@@ -648,48 +651,46 @@ class LangGraphPipeline:
                     logger.debug(
                         f"Batch duplicate: {job.get('title')} @ {job.get('company')}"
                     )
-                    all_results.append(
-                        {
-                            "status": "duplicate",
-                            "reason": "Duplicate in current batch",
-                            "heuristic_score": 0.0,
-                            "llm_score": 0,
-                            "skills_extracted": 0,
-                            "skills_matched": 0,
-                        }
-                    )
+                    chunk_results[idx] = {
+                        "status": "duplicate",
+                        "reason": "Duplicate in current batch",
+                        "heuristic_score": 0.0,
+                        "llm_score": 0,
+                        "skills_extracted": 0,
+                        "skills_matched": 0,
+                    }
                     continue
 
                 self.seen_hashes.add(job_hash)
 
-                initial_states.append(
-                    {
-                        "job_data": job,
-                        "job_hash": None,
-                        "is_duplicate": False,
-                        "extracted_skills": None,
-                        "match_result": None,
-                        "heuristic_score": None,
-                        "llm_score": None,
-                        "llm_reasoning": None,
-                        "error": None,
-                        "should_continue": True,
-                    }
+                indexed_states.append(
+                    (
+                        idx,
+                        {
+                            "job_data": job,
+                            "job_hash": None,
+                            "is_duplicate": False,
+                            "extracted_skills": None,
+                            "match_result": None,
+                            "heuristic_score": None,
+                            "llm_score": None,
+                            "llm_reasoning": None,
+                            "error": None,
+                            "should_continue": True,
+                        },
+                    )
                 )
 
-            if not initial_states:
-                continue
+            if indexed_states:
+                # Process chunk using ainvoke with asyncio.gather for concurrency
+                tasks = [self.workflow.ainvoke(state) for _, state in indexed_states]
+                final_states = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Process chunk using ainvoke with asyncio.gather for concurrency
-            tasks = [self.workflow.ainvoke(state) for state in initial_states]
-            final_states = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process results
-            for final_state in final_states:
-                if isinstance(final_state, Exception):
-                    logger.error(f"Workflow error: {final_state}")
-                    all_results.append(
-                        {
+                # Map outputs back to their original positions
+                for (idx, _), final_state in zip(indexed_states, final_states):
+                    if isinstance(final_state, Exception):
+                        logger.error(f"Workflow error: {final_state}")
+                        chunk_results[idx] = {
                             "status": "error",
                             "reason": str(final_state),
                             "heuristic_score": 0.0,
@@ -697,11 +698,24 @@ class LangGraphPipeline:
                             "skills_extracted": 0,
                             "skills_matched": 0,
                         }
-                    )
-                else:
-                    all_results.append(
-                        self._format_result(final_state, min_score, heuristic_threshold)
-                    )
+                    else:
+                        chunk_results[idx] = self._format_result(
+                            final_state, min_score, heuristic_threshold
+                        )
+
+            # Defensive fallback
+            for idx, result in enumerate(chunk_results):
+                if result is None:
+                    chunk_results[idx] = {
+                        "status": "error",
+                        "reason": "Internal ordering error: missing chunk result",
+                        "heuristic_score": 0.0,
+                        "llm_score": 0,
+                        "skills_extracted": 0,
+                        "skills_matched": 0,
+                    }
+
+            all_results.extend(chunk_results)
 
             chunk_time = time.time() - chunk_start
             logger.info(
