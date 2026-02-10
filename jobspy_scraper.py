@@ -51,19 +51,22 @@ def read_search_terms_from_file(filepath: str) -> list[dict[str, str | None]]:
     searches: list[dict[str, str | None]] = []
     try:
         with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
+            for line_number, line in enumerate(f, 1):
                 line = line.strip()
                 if line and not line.startswith("#"):
                     parts = line.split("|")
-                    if len(parts) >= 1:
-                        search = {
-                            "search_term": parts[0].strip(),
-                            "location": parts[1].strip() if len(parts) > 1 else None,
-                            "country": parts[2].strip()
-                            if len(parts) > 2
-                            else "Germany",
-                        }
-                        searches.append(search)
+                    if len(parts) != 3:
+                        logger.error(
+                            f"Invalid search format at line {line_number}: '{line}'. Expected format: search_term|location|country"
+                        )
+                        sys.exit(1)
+
+                    search = {
+                        "search_term": parts[0].strip(),
+                        "location": parts[1].strip(),
+                        "country": parts[2].strip(),
+                    }
+                    searches.append(search)
         return searches
     except FileNotFoundError:
         logger.error(f"Search terms file not found: {filepath}")
