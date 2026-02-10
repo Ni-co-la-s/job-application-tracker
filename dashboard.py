@@ -37,6 +37,10 @@ def init_session_state() -> None:
         st.session_state.page_size = 20
     if "current_page" not in st.session_state:
         st.session_state.current_page = 1
+    if "title_text_filter" not in st.session_state:
+        st.session_state.title_text_filter = ""
+    if "description_text_filter" not in st.session_state:
+        st.session_state.description_text_filter = ""
 
 
 def startup_check() -> bool:
@@ -111,6 +115,14 @@ def main() -> None:
     company_filter = st.sidebar.text_input("Company")
     location_filter = st.sidebar.text_input("Location")
 
+    # Text filters in sidebar
+    title_text_filter = st.sidebar.text_input(
+        "Filter by text in title", key="title_text_filter"
+    )
+    description_text_filter = st.sidebar.text_input(
+        "Filter by text in description", key="description_text_filter"
+    )
+
     # Application status filter
     applied_filter = st.sidebar.radio(
         "Application Status", ["All", "Applied", "Not Applied"]
@@ -159,6 +171,10 @@ def main() -> None:
         filters["company"] = company_filter
     if location_filter:
         filters["location"] = location_filter
+    if title_text_filter:
+        filters["title_text"] = title_text_filter
+    if description_text_filter:
+        filters["description_text"] = description_text_filter
     if applied_filter == "Applied":
         filters["applied"] = True
     elif applied_filter == "Not Applied":

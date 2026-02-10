@@ -367,6 +367,12 @@ class JobDatabase:
             if filters.get("location"):
                 query += " AND j.location LIKE ?"
                 params.append(f"%{filters['location']}%")
+            if filters.get("title_text"):
+                query += " AND j.title LIKE ?"
+                params.append(f"%{filters['title_text']}%")
+            if filters.get("description_text"):
+                query += " AND j.description LIKE ?"
+                params.append(f"%{filters['description_text']}%")
 
             # Application status
             if filters.get("applied"):
@@ -446,6 +452,12 @@ class JobDatabase:
             if filters.get("location"):
                 count_query += " AND j.location LIKE ?"
                 count_params.append(f"%{filters['location']}%")
+            if filters.get("title_text"):
+                count_query += " AND j.title LIKE ?"
+                count_params.append(f"%{filters['title_text']}%")
+            if filters.get("description_text"):
+                count_query += " AND j.description LIKE ?"
+                count_params.append(f"%{filters['description_text']}%")
 
             # Application status
             if filters.get("applied"):
