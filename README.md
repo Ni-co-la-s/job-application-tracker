@@ -8,7 +8,7 @@ An automated job search and tracking platform that uses Large Language Models (L
 
 ### Multi-Site Scraping
 
-Using **JobSpy** to aggregate listings from Indeed, LinkedIn, Glassdoor, ZipRecruiter, and Google Jobs, with deduplication using simhash.
+Using **[JobSpy](https://github.com/speedyapply/JobSpy)** to aggregate listings from Indeed, LinkedIn, Glassdoor, ZipRecruiter, and Google Jobs, with deduplication using simhash.
 
 <img width="2556" height="1272" alt="Scraping configuration" src="https://github.com/user-attachments/assets/8130eac5-a27b-43e4-acaa-5eb2865833d4" />
 
@@ -90,7 +90,14 @@ Those will not be passed to LLMs.
 
 The system relies on several plain-text files in the `config/` directory to personalize the matching logic:
 
-- **searches.txt**: Define job searches that need to be made using the format `job_title|location|country`.
+- **searches.txt**: Define job searches using the format `job_title|location|country` (exactly 3 parts separated by `|`).
+  - Example: `Test engineer|Berlin|Germany`
+  - LinkedIn supports location clusters (for example regions) in the `location` field, see: https://www.linkedin.com/help/recruiter/answer/a524054
+  - Example for LinkedIn cluster search: `Data Scientist|Latin America|worldwide`
+  - Site-specific behavior:
+    - only `location` is used for LinkedIn and ZipRecruiter
+    - `country` is used for Indeed and Glassdoor, `location` helps narrowing down (supported countries: https://github.com/speedyapply/JobSpy?tab=readme-ov-file#supported-countries-for-job-searching)
+  - Important: if you use LinkedIn-specific cluster values (like `Latin America|worldwide`) while also scraping Indeed/Glassdoor in the same run, Indeed/Glassdoor may return no results for those entries.
 - **resume.txt**: Your resume in plain text for LLM processing. This is different from the resumes in Resumes/final/ and will be passed to LLMs when scoring the jobs found.
 - **candidate_skills.txt**: A list of your primary technical skills (one per line). The skills extracted from the jobs will then be matched to them.
 - **prompts.json**: Contains the prompts for extraction and scoring logic. 
