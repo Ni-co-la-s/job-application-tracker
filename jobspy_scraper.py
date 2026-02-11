@@ -93,7 +93,7 @@ def main() -> None:
         "--sites",
         nargs="+",
         default=["indeed", "glassdoor"],
-        choices=["indeed", "linkedin", "glassdoor", "zip_recruiter", "google"],
+        choices=["indeed", "linkedin", "glassdoor", "zip_recruiter"],
         help="Job sites to scrape (default: indeed linkedin)",
     )
     parser.add_argument(
@@ -191,7 +191,7 @@ def main() -> None:
 
             # Add LinkedIn-specific parameters if LinkedIn is in the list
             if "linkedin" in args.sites:
-                scrape_kwargs["linkedin_fetch_description"] = True  # KEY FIX!
+                scrape_kwargs["linkedin_fetch_description"] = True
                 logger.info(
                     "   LinkedIn: Fetching full descriptions (slower but more complete)"
                 )

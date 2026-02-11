@@ -242,7 +242,6 @@ def render_job_browser(
                 "linkedin": "💼",
                 "glassdoor": "🏢",
                 "zip_recruiter": "📨",
-                "google": "🔍",
                 "other": "📝",
             }.get(job.get("site", "").lower(), "🌐")
 

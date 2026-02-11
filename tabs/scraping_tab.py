@@ -196,7 +196,7 @@ def render_scraping_tab() -> None:
 
             sites = st.multiselect(
                 "Job Sites",
-                options=["indeed", "linkedin", "glassdoor", "zip_recruiter", "google"],
+                options=["indeed", "linkedin", "glassdoor", "zip_recruiter"],
                 default=["indeed", "linkedin"],
                 help="Select which job sites to scrape",
             )

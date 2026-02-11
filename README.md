@@ -8,7 +8,12 @@ An automated job search and tracking platform that uses Large Language Models (L
 
 ### Multi-Site Scraping
 
-Using **[JobSpy](https://github.com/speedyapply/JobSpy)** to aggregate listings from Indeed, LinkedIn, Glassdoor, ZipRecruiter, and Google Jobs, with deduplication using simhash.
+Using **[JobSpy](https://github.com/speedyapply/JobSpy)** to aggregate listings from Indeed, LinkedIn, Glassdoor, and ZipRecruiter, with deduplication using simhash.
+
+Current scraper guidance:
+- **Recommended:** Indeed and LinkedIn
+- **ZipRecruiter:** available only in the US and not yet very tested
+- **Glassdoor:** sometimes does not retrieve the full description correctly
 
 <img width="2556" height="1272" alt="Scraping configuration" src="https://github.com/user-attachments/assets/8130eac5-a27b-43e4-acaa-5eb2865833d4" />
 

@@ -105,7 +105,6 @@ def render_add_job_panel(db: JobDatabase) -> None:
                 "linkedin",
                 "glassdoor",
                 "zip_recruiter",
-                "google",
                 "other",
             ]
             site = st.selectbox(
