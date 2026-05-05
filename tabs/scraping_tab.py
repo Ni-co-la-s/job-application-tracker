@@ -135,13 +135,22 @@ def render_scraping_tab() -> None:
                 with open(searches_file_path, "r", encoding="utf-8") as f:
                     current_searches = f.read()
             else:
-                current_searches = "# Format: search_term|location|country\n# Example:\n# data scientist|Berlin|Germany\n"
+                current_searches = (
+                    "# Format: search_term|location|country[|linkedin_company_ids]\n"
+                    "# linkedin_company_ids is optional and comma-separated, e.g. 1441,1035\n"
+                    "# Example:\n"
+                    "# data scientist|Berlin|Germany|1441,1035\n"
+                )
 
             searches_text = st.text_area(
                 "Edit search terms",
                 value=current_searches,
                 height=300,
-                help="Format: search_term|location|country (one per line)\nLines starting with # are ignored",
+                help=(
+                    "Format: search_term|location|country[|linkedin_company_ids] (one per line)\n"
+                    "linkedin_company_ids is optional, comma-separated integers for LinkedIn\n"
+                    "Lines starting with # are ignored"
+                ),
                 key="searches_editor",
             )
 
@@ -172,9 +181,16 @@ def render_scraping_tab() -> None:
                             search_term = parts[0].strip()
                             location = parts[1].strip() if len(parts) > 1 else "N/A"
                             country = parts[2].strip() if len(parts) > 2 else "Germany"
-                            valid_searches.append(
-                                f"• {search_term} in {location}, {country}"
-                            )
+                            company_ids = parts[3].strip() if len(parts) > 3 else ""
+
+                            if company_ids:
+                                valid_searches.append(
+                                    f"• {search_term} in {location}, {country} [LinkedIn IDs: {company_ids}]"
+                                )
+                            else:
+                                valid_searches.append(
+                                    f"• {search_term} in {location}, {country}"
+                                )
 
                 if valid_searches:
                     for search in valid_searches:

@@ -95,8 +95,11 @@ Those will not be passed to LLMs.
 
 The system relies on several plain-text files in the `config/` directory to personalize the matching logic:
 
-- **searches.txt**: Define job searches using the format `job_title|location|country` (exactly 3 parts separated by `|`).
+- **searches.txt**: Define job searches using `job_title|location|country` (or `job_title|location|country|linkedin_company_ids`).
   - Example: `Test engineer|Berlin|Germany`
+  - LinkedIn company-targeted example: `Data Scientist|Berlin|Germany|1441,1035`
+  - `linkedin_company_ids` is optional and must be comma-separated integers.
+  - Where to find LinkedIn company IDs? Open the company page on LinkedIn, go on jobs, pass a query and copy the numeric id from the URL (for example `https://www.linkedin.com/jobs/search/?f_C=1441` → `1441`).
   - LinkedIn supports location clusters (for example regions) in the `location` field, see: https://www.linkedin.com/help/recruiter/answer/a524054
   - Example for LinkedIn cluster search: `Data Scientist|Latin America|worldwide`
   - Site-specific behavior:

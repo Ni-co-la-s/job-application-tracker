@@ -1,5 +1,5 @@
-# Searches that will be done when scraping. Write yours in searches.txt one per line as job title|Location|Country. Remove this top comment.  
+# Searches that will be done when scraping. Write yours in searches.txt one per line as job title|Location|Country or title|Location|Country|linkedin_company_ids. Remove this top comment.  
 Digital Marketing Manager|Paris|France
 SEO Specialist|Berlin|Germany
-Data Scientist|European Union|worldwide
+Data Scientist|European Union|worldwide|1441,1035
 Growth Hacker|Lyon|France

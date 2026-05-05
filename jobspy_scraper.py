@@ -32,12 +32,13 @@ logger.info("✓ Database initialized")
 def read_search_terms_from_file(filepath: str) -> list[dict[str, str | None]]:
     """Read search configurations from file.
 
-    Format: search_term|location|country (one per line)
+    Format: search_term|location|country|linkedin_company_ids (one per line)
+    where linkedin_company_ids is optional and comma-separated (e.g. 1441,1035)
 
     Example:
         machine learning|Berlin|Germany
         data science|Munich|Germany
-        software engineer|Paris|France
+        software engineer|Paris|France|1441,1035
 
     Args:
         filepath: Path to the search terms file.
@@ -55,16 +56,31 @@ def read_search_terms_from_file(filepath: str) -> list[dict[str, str | None]]:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     parts = line.split("|")
-                    if len(parts) != 3:
+                    if len(parts) not in (3, 4):
                         logger.error(
-                            f"Invalid search format at line {line_number}: '{line}'. Expected format: search_term|location|country"
+                            f"Invalid search format at line {line_number}: '{line}'. Expected format: search_term|location|country or search_term|location|country|linkedin_company_ids"
                         )
                         sys.exit(1)
+
+                    linkedin_company_ids = None
+                    if len(parts) == 4 and parts[3].strip():
+                        try:
+                            linkedin_company_ids = [
+                                int(company_id.strip())
+                                for company_id in parts[3].split(",")
+                                if company_id.strip()
+                            ]
+                        except ValueError:
+                            logger.error(
+                                f"Invalid linkedin_company_ids at line {line_number}: '{parts[3]}'. Expected comma-separated integers, e.g. 1441,1035"
+                            )
+                            sys.exit(1)
 
                     search = {
                         "search_term": parts[0].strip(),
                         "location": parts[1].strip(),
                         "country": parts[2].strip(),
+                        "linkedin_company_ids": linkedin_company_ids,
                     }
                     searches.append(search)
         return searches
@@ -84,7 +100,7 @@ def main() -> None:
     parser.add_argument(
         "--searches-file",
         default=SEARCHES_FILE,
-        help=f"Path to file with search terms (format: search_term|location|country). Default: {SEARCHES_FILE}",
+        help=f"Path to file with search terms (format: search_term|location|country[|linkedin_company_ids]). Default: {SEARCHES_FILE}",
     )
     parser.add_argument(
         "--resume", required=True, help="Path to your resume (text file)"
@@ -192,6 +208,10 @@ def main() -> None:
             # Add LinkedIn-specific parameters if LinkedIn is in the list
             if "linkedin" in args.sites:
                 scrape_kwargs["linkedin_fetch_description"] = True
+                if search.get("linkedin_company_ids"):
+                    scrape_kwargs["linkedin_company_ids"] = search[
+                        "linkedin_company_ids"
+                    ]
                 logger.info(
                     "   LinkedIn: Fetching full descriptions (slower but more complete)"
                 )
