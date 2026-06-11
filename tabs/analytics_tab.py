@@ -1,5 +1,6 @@
 """Analytics Tab for query and visualization interface."""
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -7,81 +8,26 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+from constants import QUERIES_FILE
 from modules.database import JobDatabase
 
 logger = logging.getLogger(__name__)
 
-# Saved queries with recommended visualizations
-SAVED_QUERIES = {
-    "Jobs by Site": {
-        "sql": "SELECT site, COUNT(*) as count FROM jobs GROUP BY site ORDER BY count DESC",
-        "viz": "pie",
-        "description": "Distribution of jobs across different platforms",
-    },
-    "Top Skills": {
-        "sql": """SELECT skill, COUNT(*) as jobs
-FROM (
-    SELECT json_each.value as skill
-    FROM jobs, json_each(jobs.extracted_skills)
-    WHERE jobs.extracted_skills IS NOT NULL 
-    AND jobs.extracted_skills != ''
-    AND jobs.extracted_skills != '[]'
-)
-GROUP BY skill 
-ORDER BY jobs DESC 
-LIMIT 15""",
-        "viz": "hbar",
-        "description": "Most frequently extracted skills from job descriptions",
-    },
-    "My Matched Skills": {
-        "sql": """SELECT skill, COUNT(*) as jobs
-FROM (
-    SELECT json_each.value as skill
-    FROM jobs, json_each(jobs.matched_skills)
-    WHERE jobs.matched_skills IS NOT NULL 
-    AND jobs.matched_skills != ''
-    AND jobs.matched_skills != '[]'
-)
-GROUP BY skill 
-ORDER BY jobs DESC 
-LIMIT 15""",
-        "viz": "hbar",
-        "description": "Skills from your resume that match job requirements",
-    },
-    "Score Distribution": {
-        "sql": "SELECT llm_score as score, COUNT(*) as count FROM jobs WHERE llm_score IS NOT NULL GROUP BY llm_score ORDER BY llm_score",
-        "viz": "bar",
-        "description": "Distribution of job match scores",
-    },
-    "Jobs Timeline": {
-        "sql": "SELECT DATE(date_scraped) as date, COUNT(*) as count FROM jobs WHERE date_scraped IS NOT NULL GROUP BY date ORDER BY date",
-        "viz": "line",
-        "description": "Jobs scraped over time",
-    },
-    "Top Companies": {
-        "sql": "SELECT company, COUNT(*) as jobs FROM jobs WHERE company IS NOT NULL GROUP BY company ORDER BY jobs DESC LIMIT 10",
-        "viz": "hbar",
-        "description": "Companies with most job postings",
-    },
-    "Key Metrics": {
-        "sql": """SELECT 
-    (SELECT COUNT(*) FROM jobs) as total_jobs,
-    (SELECT COUNT(*) FROM applications) as applications,
-    (SELECT ROUND(AVG(llm_score), 1) FROM jobs WHERE llm_score IS NOT NULL) as avg_score,
-    (SELECT COUNT(*) FROM jobs WHERE llm_score >= 8) as high_matches""",
-        "viz": "metric",
-        "description": "Overview statistics",
-    },
-    "Remote vs On-site": {
-        "sql": """SELECT 
-    CASE WHEN is_remote = 1 THEN 'Remote' ELSE 'On-site' END as type,
-    COUNT(*) as count
-FROM jobs
-GROUP BY is_remote""",
-        "viz": "pie",
-        "description": "Remote vs on-site job distribution",
-    },
+VIZ_TYPES = {
+    "table": "📋 Table",
+    "bar": "📊 Bar Chart",
+    "hbar": "📊 Horizontal Bar",
+    "pie": "🥧 Pie Chart",
+    "line": "📈 Line Chart",
+    "metric": "🎯 Metric Cards",
 }
+
+
+def save_queries() -> None:
+    """Persist saved analytics queries to the queries JSON file."""
+    with open(QUERIES_FILE, "w", encoding="utf-8") as f:
+        json.dump(st.session_state.saved_queries, f, indent=4)
 
 
 def render_analytics_tab(db: JobDatabase) -> None:
@@ -93,6 +39,17 @@ def render_analytics_tab(db: JobDatabase) -> None:
     st.title("📊 Analytics")
 
     ro_conn = db.get_read_only_conn()
+
+    # Initialize session state for saved queries
+    if "saved_queries" not in st.session_state:
+        try:
+            with open(QUERIES_FILE, "r", encoding="utf-8") as f:
+                saved_queries = json.load(f)
+                st.session_state.saved_queries = (
+                    saved_queries if isinstance(saved_queries, dict) else {}
+                )
+        except (FileNotFoundError, json.JSONDecodeError):
+            st.session_state.saved_queries = {}
 
     # Schema reference at top (collapsible)
     with st.expander("📚 Database Schema Reference"):
@@ -109,33 +66,150 @@ def render_analytics_tab(db: JobDatabase) -> None:
         if "selected_query_name" not in st.session_state:
             st.session_state.selected_query_name = ""
 
+        saved_query_names = list(st.session_state.saved_queries.keys())
+        if st.session_state.selected_query_name not in saved_query_names:
+            st.session_state.selected_query_name = ""
+
+        query_options = [""] + saved_query_names
+
         # Query selector
         selected_query_name = st.selectbox(
             "Select a query",
-            options=[""] + list(SAVED_QUERIES.keys()),
+            options=query_options,
             format_func=lambda x: "-- Select a query --" if x == "" else x,
             key="saved_query_selector",
-            index=0
-            if st.session_state.selected_query_name == ""
-            else list([""] + list(SAVED_QUERIES.keys())).index(
-                st.session_state.selected_query_name
-            ),
+            index=query_options.index(st.session_state.selected_query_name),
         )
 
         # Update session state when selection changes
         st.session_state.selected_query_name = selected_query_name
 
         if selected_query_name and selected_query_name != "":
-            query_info = SAVED_QUERIES[selected_query_name]
-            st.caption(query_info["description"])
+            query_info = st.session_state.saved_queries[selected_query_name]
+            st.caption(query_info.get("description", ""))
 
             if st.button("📥 Load Query", width="stretch"):
-                st.session_state.current_query = query_info["sql"]
-                st.session_state.recommended_viz = query_info["viz"]
+                st.session_state.current_query = query_info.get("sql", "")
+                st.session_state.recommended_viz = query_info.get("viz", "table")
                 st.session_state.query_version = (
                     st.session_state.get("query_version", 0) + 1
                 )  # Increment to force re-render
                 st.rerun()
+
+        st.divider()
+
+        # Query management (collapsed by default)
+        with st.expander("⚙️ Manage Queries"):
+            query_action = st.radio(
+                "Action",
+                ["Create New", "Edit/Delete"],
+                horizontal=True,
+                key="query_action_radio",
+            )
+
+            if query_action == "Create New":
+                with st.form("create_query_form", clear_on_submit=True):
+                    new_name = st.text_input(
+                        "Query Name", placeholder="e.g., Top Remote Jobs"
+                    )
+                    new_sql = st.text_area(
+                        "SQL Query",
+                        placeholder="SELECT * FROM jobs WHERE is_remote = 1 LIMIT 10",
+                        height=100,
+                    )
+                    new_viz = st.selectbox(
+                        "Visualization Type",
+                        options=list(VIZ_TYPES.keys()),
+                        format_func=lambda x: VIZ_TYPES[x],
+                    )
+                    new_description = st.text_input(
+                        "Description",
+                        placeholder="Brief description of what this query shows",
+                    )
+
+                    if st.form_submit_button("Create Query", width="stretch"):
+                        if new_name and new_sql and new_description:
+                            if new_name in st.session_state.saved_queries:
+                                st.error(f"Query '{new_name}' already exists")
+                            else:
+                                st.session_state.saved_queries[new_name] = {
+                                    "sql": new_sql,
+                                    "viz": new_viz,
+                                    "description": new_description,
+                                }
+                                save_queries()
+                                st.toast(f"✓ Created '{new_name}'")
+                                st.rerun()
+                        else:
+                            st.error("All fields are required")
+
+            else:  # Edit/Delete
+                if st.session_state.saved_queries:
+                    query_to_edit = st.selectbox(
+                        "Select query",
+                        options=list(st.session_state.saved_queries.keys()),
+                        key="query_to_edit",
+                    )
+
+                    if query_to_edit:
+                        query = st.session_state.saved_queries[query_to_edit]
+                        current_viz = query.get("viz", "table")
+                        if current_viz not in VIZ_TYPES:
+                            current_viz = "table"
+
+                        with st.form("edit_query_form"):
+                            edit_name = st.text_input("Name", value=query_to_edit)
+                            edit_sql = st.text_area(
+                                "SQL Query", value=query.get("sql", ""), height=100
+                            )
+                            edit_viz = st.selectbox(
+                                "Visualization Type",
+                                options=list(VIZ_TYPES.keys()),
+                                index=list(VIZ_TYPES.keys()).index(current_viz),
+                                format_func=lambda x: VIZ_TYPES[x],
+                            )
+                            edit_description = st.text_input(
+                                "Description", value=query.get("description", "")
+                            )
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.form_submit_button("💾 Update", width="stretch"):
+                                    if not edit_name or not edit_sql or not edit_description:
+                                        st.error("All fields are required")
+                                    elif (
+                                        edit_name != query_to_edit
+                                        and edit_name in st.session_state.saved_queries
+                                    ):
+                                        st.error(f"'{edit_name}' already exists")
+                                    else:
+                                        if edit_name != query_to_edit:
+                                            del st.session_state.saved_queries[
+                                                query_to_edit
+                                            ]
+                                        st.session_state.saved_queries[edit_name] = {
+                                            "sql": edit_sql,
+                                            "viz": edit_viz,
+                                            "description": edit_description,
+                                        }
+                                        st.session_state.selected_query_name = edit_name
+                                        save_queries()
+                                        st.toast("✓ Updated")
+                                        st.rerun()
+
+                            with col2:
+                                if st.form_submit_button("🗑️ Delete", width="stretch"):
+                                    del st.session_state.saved_queries[query_to_edit]
+                                    if (
+                                        st.session_state.selected_query_name
+                                        == query_to_edit
+                                    ):
+                                        st.session_state.selected_query_name = ""
+                                    save_queries()
+                                    st.toast("✓ Deleted")
+                                    st.rerun()
+                else:
+                    st.info("No queries yet. Create one above!")
 
         st.divider()
 
@@ -161,26 +235,19 @@ def render_analytics_tab(db: JobDatabase) -> None:
         # Visualization Type Selector
         st.subheader("📊 Visualization Type")
 
-        viz_types = {
-            "table": "📋 Table",
-            "bar": "📊 Bar Chart",
-            "hbar": "📊 Horizontal Bar",
-            "pie": "🥧 Pie Chart",
-            "line": "📈 Line Chart",
-            "metric": "🎯 Metric Cards",
-        }
-
         # Initialize recommended viz if not exists
         if "recommended_viz" not in st.session_state:
             st.session_state.recommended_viz = "table"
+        if st.session_state.recommended_viz not in VIZ_TYPES:
+            st.session_state.recommended_viz = "table"
 
         # Get index for default selection
-        default_index = list(viz_types.keys()).index(st.session_state.recommended_viz)
+        default_index = list(VIZ_TYPES.keys()).index(st.session_state.recommended_viz)
 
         viz_type = st.radio(
             "Choose visualization",
-            options=list(viz_types.keys()),
-            format_func=lambda x: viz_types[x],
+            options=list(VIZ_TYPES.keys()),
+            format_func=lambda x: VIZ_TYPES[x],
             index=default_index,
             key=f"viz_type_selector_{st.session_state.query_version}",  # Dynamic key to force update
         )

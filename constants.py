@@ -11,6 +11,7 @@ RESUME_FILE = "config/resume.txt"
 # Configuration files
 PROMPTS_FILE = "config/prompts.json"
 PRESETS_FILE = "config/presets.json"
+QUERIES_FILE = "config/queries.json"
 INTERVIEW_STAGES_FILE = "config/interview_stages.json"
 
 # Directory paths

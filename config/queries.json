@@ -1,0 +1,42 @@
+{
+    "Jobs by Site": {
+        "sql": "SELECT site, COUNT(*) as count FROM jobs GROUP BY site ORDER BY count DESC",
+        "viz": "pie",
+        "description": "Distribution of jobs across different platforms"
+    },
+    "Top Skills": {
+        "sql": "SELECT skill, COUNT(*) as jobs\nFROM (\n    SELECT json_each.value as skill\n    FROM jobs, json_each(jobs.extracted_skills)\n    WHERE jobs.extracted_skills IS NOT NULL \n    AND jobs.extracted_skills != ''\n    AND jobs.extracted_skills != '[]'\n)\nGROUP BY skill \nORDER BY jobs DESC \nLIMIT 15",
+        "viz": "hbar",
+        "description": "Most frequently extracted skills from job descriptions"
+    },
+    "My Matched Skills": {
+        "sql": "SELECT skill, COUNT(*) as jobs\nFROM (\n    SELECT json_each.value as skill\n    FROM jobs, json_each(jobs.matched_skills)\n    WHERE jobs.matched_skills IS NOT NULL \n    AND jobs.matched_skills != ''\n    AND jobs.matched_skills != '[]'\n)\nGROUP BY skill \nORDER BY jobs DESC \nLIMIT 15",
+        "viz": "hbar",
+        "description": "Skills from your resume that match job requirements"
+    },
+    "Score Distribution": {
+        "sql": "SELECT llm_score as score, COUNT(*) as count FROM jobs WHERE llm_score IS NOT NULL GROUP BY llm_score ORDER BY llm_score",
+        "viz": "bar",
+        "description": "Distribution of job match scores"
+    },
+    "Jobs Timeline": {
+        "sql": "SELECT DATE(date_scraped) as date, COUNT(*) as count FROM jobs WHERE date_scraped IS NOT NULL GROUP BY date ORDER BY date",
+        "viz": "line",
+        "description": "Jobs scraped over time"
+    },
+    "Top Companies": {
+        "sql": "SELECT company, COUNT(*) as jobs FROM jobs WHERE company IS NOT NULL GROUP BY company ORDER BY jobs DESC LIMIT 10",
+        "viz": "hbar",
+        "description": "Companies with most job postings"
+    },
+    "Key Metrics": {
+        "sql": "SELECT \n    (SELECT COUNT(*) FROM jobs) as total_jobs,\n    (SELECT COUNT(*) FROM applications) as applications,\n    (SELECT ROUND(AVG(llm_score), 1) FROM jobs WHERE llm_score IS NOT NULL) as avg_score,\n    (SELECT COUNT(*) FROM jobs WHERE llm_score >= 8) as high_matches",
+        "viz": "metric",
+        "description": "Overview statistics"
+    },
+    "Remote vs On-site": {
+        "sql": "SELECT \n    CASE WHEN is_remote = 1 THEN 'Remote' ELSE 'On-site' END as type,\n    COUNT(*) as count\nFROM jobs\nGROUP BY is_remote",
+        "viz": "pie",
+        "description": "Remote vs on-site job distribution"
+    }
+}
