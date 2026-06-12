@@ -114,6 +114,14 @@ Resumes/tex/<template-name>/*.cls, *.sty, fonts, images, etc.
 
 Each template folder should contain one editable `resume.tex` plus any supporting files. The AI only edits `resume.tex`; if resume content is split across `\input` or `\include` files, that content will not be tailored. Keep resume content in `resume.tex` for best results.
 
+Optional per-template PII redaction for AI Resume Tailoring, which is applied to the resume.tex file only:
+
+```text
+Resumes/tex/<template-name>/pii_redactions.txt
+```
+
+One literal string per line. Redaction strings must be written exactly as they appear in the `.tex`.
+
 ## Configuration
 
 The system relies on local files in the `config/` directory to personalize the matching logic. You can modify them to match your expectations.

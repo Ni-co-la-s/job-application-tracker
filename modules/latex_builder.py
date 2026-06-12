@@ -62,7 +62,9 @@ def build_pdf(
                 else (proc.stdout + proc.stderr)
             )
             errs = "\n".join(line for line in text.splitlines() if line.startswith("!"))
-            raise LatexBuildError(errs or "Unknown LaTeX error. Full log is shown below.", text)
+            raise LatexBuildError(
+                errs or "Unknown LaTeX error. Full log is shown below.", text
+            )
 
         return pdf.read_bytes()
 
