@@ -52,7 +52,13 @@ class LLMConfigManager:
 
     def __init__(self):
         load_dotenv(override=True)
-        self.stages = ["skills_extraction", "skills_matching", "job_scoring", "chat"]
+        self.stages = [
+            "skills_extraction",
+            "skills_matching",
+            "job_scoring",
+            "chat",
+            "resume_tailoring",
+        ]
 
         # Load configurations for all stages
         self.stage_configs: Dict[str, StageConfig] = {}

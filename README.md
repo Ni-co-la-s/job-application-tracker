@@ -27,6 +27,15 @@ A dedicated interface to interact with job descriptions for drafting cover lette
 
 <img width="2558" height="1270" alt="AI Chat Interface" src="https://github.com/user-attachments/assets/9ff160b1-7d74-40d3-82f6-dca3ef45ae95" />
 
+### AI Resume Tailoring
+
+Generate job-specific LaTeX resume edits from a selected job posting, review each search/replacement edit individually, compile an in-app PDF preview, and save the approved PDF to `Resumes/final/`.
+
+The tailoring workflow uses:
+- `config/resume.txt` as the full information bank of your experience, projects, and skills.
+- `Resumes/tex/<template-name>/resume.tex` as the editable LaTeX target.
+- The selected job's stored database description as the target job context.
+
 ### Data Analytics
 
 Run custom SQL queries for analytics and visualization.
@@ -50,6 +59,7 @@ The system processes every job through a structured LangGraph workflow to ensure
 - Python 3.12 or higher (not tested on older versions yet)
 - `uv` (Recommended package manager) or pip
 - An OpenAI-compatible API key or local LLLM setup (Supports OpenAI, DeepSeek, Anthropic, llama.cpp or LM Studio...)
+- Optional for resume tailoring: [Tectonic](https://tectonic-typesetting.github.io/) or a TeX distribution with `latexmk` on your PATH. Tectonic is recommended.
 
 ### Setup
 
@@ -90,10 +100,19 @@ cp .env.example .env
 for f in config/*.example; do cp "$f" "${f%.example}"; done
 ```
 
-4. **Add Resume PDF**
+4. **Add Resume PDF and/or LaTeX Templates**
 
 Place your resumes in PDF format within `Resumes/final/`. You can have several versions to track how they are performing. The dashboard will automatically detect these for application tracking.
 Those will not be passed to LLMs.
+
+For AI Resume Tailoring, place LaTeX sources under:
+
+```text
+Resumes/tex/<template-name>/resume.tex
+Resumes/tex/<template-name>/*.cls, *.sty, fonts, images, etc.
+```
+
+Each template folder should contain one editable `resume.tex` plus any supporting files. The AI only edits `resume.tex`; if resume content is split across `\input` or `\include` files, that content will not be tailored. Keep resume content in `resume.tex` for best results.
 
 ## Configuration
 
@@ -110,12 +129,15 @@ The system relies on local files in the `config/` directory to personalize the m
     - only `location` is used for LinkedIn and ZipRecruiter
     - `country` is used for Indeed and Glassdoor, `location` helps narrowing down (supported countries: https://github.com/speedyapply/JobSpy?tab=readme-ov-file#supported-countries-for-job-searching)
   - Important: if you use LinkedIn-specific cluster values (like `Latin America|worldwide`) while also scraping Indeed/Glassdoor in the same run, Indeed/Glassdoor may return no results for those entries.
-- **resume.txt**: Your resume in plain text for LLM processing. This is different from the resumes in Resumes/final/ and will be passed to LLMs when scoring the jobs found. Can be modified in the **User Config → Profile Files** tab of the dashboard.
+- **resume.txt**: Your resume in plain text for LLM processing. This is different from the resumes in Resumes/final/ and will be passed to LLMs when scoring the jobs found.
+  - Can be modified in the **User Config → Profile Files** tab of the dashboard.
+  - For AI Resume Tailoring, this file is treated as the information bank: a superset of your experience and projects that the model may draw from without inventing facts.
 - **candidate_skills.txt**: A list of your primary technical skills (one per line). The skills extracted from the jobs will then be matched to them. Can be modified in the **User Config → Profile Files** tab of the dashboard.
-- **prompts.json**: Contains the prompts for extraction, matching, and scoring logic. Can be modified in the **User Config → Prompts** tab of the dashboard.
+- **prompts.json**: Contains the prompts for extraction, matching, scoring, and resume tailoring logic. Can be modified in the **User Config → Prompts** tab of the dashboard.
 - **presets.json**: Saved prompt templates for the AI Chat interface. Can be modified in the **AI Tools** tab of the dashboard.
 - **queries.json**: Saved SQL analytics queries with their recommended visualization type and description. Can be modified in the **Analytics** tab of the dashboard.
 - **interview_stages.json**: Interview stages for tracking application stages (refusal, offers, phone screening...). Defaults are created from `interview_stages.json.example`. Be careful changing this after you have saved stages in the database.
+
 ## Usage
 
 ### Streamlit Dashboard
@@ -125,6 +147,24 @@ The primary interface. It allows you to run scrapers, browse matches, use AI too
 ```bash
 uv run streamlit run dashboard.py
 ```
+
+### AI Resume Tailoring Setup
+
+The Resume Tailoring tab requires its own dedicated LLM configuration. It does not fall back to the chat or scoring model. Set these variables in `.env`:
+
+```env
+RESUME_TAILORING_MODEL=gpt-4o-mini
+RESUME_TAILORING_API_KEY=sk-...
+RESUME_TAILORING_BASE_URL=https://api.openai.com/v1
+```
+
+The tab compiles PDFs using a system LaTeX engine:
+
+1. Prefer `tectonic` if available.
+2. Fall back to `latexmk -pdf`.
+3. For fontspec templates, select the XeLaTeX or LuaLaTeX option in the UI, which uses `latexmk -pdfxe` or `latexmk -pdflua`.
+
+Some pdflatex-only templates may need tweaks when compiled with Tectonic or XeLaTeX/LuaLaTeX.
 
 ### Standalone Scraper
 

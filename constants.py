@@ -15,4 +15,5 @@ QUERIES_FILE = "config/queries.json"
 INTERVIEW_STAGES_FILE = "config/interview_stages.json"
 
 # Directory paths
+RESUME_TEX_DIR = "Resumes/tex"
 RESUME_FINAL_DIR = "Resumes/final"

@@ -5,6 +5,7 @@ description = "AI-powered job application tracker with automated scraping and ma
 requires-python = ">=3.12"
 dependencies = [
     "streamlit>=1.52.2",
+    "streamlit-pdf-viewer>=0.0.26",
     "pandas>=2.3.3",
     "python-jobspy @ https://github.com/Ni-co-la-s/JobSpy/archive/refs/heads/main.zip",
     "langgraph>=1.0.5",
