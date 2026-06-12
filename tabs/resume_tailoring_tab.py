@@ -259,6 +259,9 @@ def _build_preview(db: JobDatabase, timeout: int) -> None:
             run_id, status="build_error", edits_json=json.dumps(results, indent=2)
         )
         st.error(f"LaTeX build failed:\n{exc}")
+        if exc.full_log:
+            with st.expander("Full LaTeX build log", expanded=True):
+                st.code(exc.full_log, language="text")
 
 
 def _save_pdf(db: JobDatabase, pdf_bytes: bytes, output_name: str) -> None:

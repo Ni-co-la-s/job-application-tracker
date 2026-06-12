@@ -9,6 +9,10 @@ from pathlib import Path
 class LatexBuildError(Exception):
     """Raised when LaTeX compilation fails."""
 
+    def __init__(self, message: str, full_log: str | None = None):
+        super().__init__(message)
+        self.full_log = full_log or ""
+
 
 def build_pdf(
     tex_source: str,
@@ -42,7 +46,12 @@ def build_pdf(
         except FileNotFoundError as exc:
             raise LatexBuildError(f"Build tool not found on PATH: {cmd[0]}") from exc
         except subprocess.TimeoutExpired as exc:
-            raise LatexBuildError("Compilation timed out.") from exc
+            output = ""
+            if exc.stdout:
+                output += str(exc.stdout)
+            if exc.stderr:
+                output += str(exc.stderr)
+            raise LatexBuildError("Compilation timed out.", output) from exc
 
         pdf = work / "resume.pdf"
         if proc.returncode != 0 or not pdf.exists():
@@ -53,7 +62,7 @@ def build_pdf(
                 else (proc.stdout + proc.stderr)
             )
             errs = "\n".join(line for line in text.splitlines() if line.startswith("!"))
-            raise LatexBuildError(errs or "Unknown LaTeX error; see full log.")
+            raise LatexBuildError(errs or "Unknown LaTeX error. Full log is shown below.", text)
 
         return pdf.read_bytes()
 
