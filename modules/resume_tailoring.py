@@ -15,7 +15,7 @@ class ResumeEdit(BaseModel):
     """One deterministic search/replacement edit proposed by the LLM."""
 
     search: str = Field(min_length=1)
-    replacement: str = Field(min_length=1)
+    replacement: str = Field(default="")
     reason: str = Field(default="")
 
 
