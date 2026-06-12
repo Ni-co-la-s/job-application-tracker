@@ -14,6 +14,7 @@ from modules.database import JobDatabase
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
 from tabs.job_browser_tab import get_resume_version_pdf, render_job_browser
+from tabs.resume_tailoring_tab import render_resume_tailoring_tab
 from tabs.scraping_tab import render_scraping_tab
 from tabs.user_files_tab import render_user_files_tab
 
@@ -109,6 +110,7 @@ def startup_check() -> bool:
 
     # Create required directories
     Path(constants.RESUME_FINAL_DIR).mkdir(parents=True, exist_ok=True)
+    Path(constants.RESUME_TEX_DIR).mkdir(parents=True, exist_ok=True)
 
     return True
 
@@ -248,13 +250,14 @@ def main() -> None:
         jobs, total_count = [], 0
 
     # Main content - Tabbed interface
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         [
             "📋 Job Browser",
             "🤖 AI Tools",
-            "⚙️ User Config",
+            "🧵 Resume Tailoring",
             "🔍 Scraping",
             "📊 Analytics",
+            "⚙️ User Config",
         ]
     )
 
@@ -279,9 +282,10 @@ def main() -> None:
 
     with tab3:
         try:
-            render_user_files_tab(db, jobs)
+            render_resume_tailoring_tab(db, jobs)
         except Exception as e:
-            st.error(f"❌ Error in User Config tab: {e}")
+            logger.error(f"Error in Resume Tailoring tab: {e}")
+            st.error(f"❌ Error in Resume Tailoring tab: {e}")
             import traceback
 
             st.code(traceback.format_exc())
@@ -297,6 +301,15 @@ def main() -> None:
 
     with tab5:
         render_analytics_tab(db)
+
+    with tab6:
+        try:
+            render_user_files_tab(db, jobs)
+        except Exception as e:
+            st.error(f"❌ Error in User Config tab: {e}")
+            import traceback
+
+            st.code(traceback.format_exc())
 
     try:
         # Export section in sidebar

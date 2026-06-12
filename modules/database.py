@@ -97,6 +97,21 @@ class JobDatabase:
         )
         """)
 
+        # Resume tailoring runs table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resume_tailoring_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            base_template TEXT NOT NULL,
+            output_path TEXT,
+            status TEXT DEFAULT 'draft',
+            edits_json TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (job_id) REFERENCES jobs(id)
+        )
+        """)
+
         # Status options:
         # - no_response
         # - automatic_rejection
@@ -133,6 +148,11 @@ class JobDatabase:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_archived 
             ON jobs(archived)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_resume_tailoring_runs_job_id
+            ON resume_tailoring_runs(job_id)
         """)
 
         self.conn.commit()
@@ -546,6 +566,95 @@ class JobDatabase:
         cursor.execute("SELECT * FROM applications WHERE job_id = ?", (job_id,))
         row = cursor.fetchone()
 
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+        return None
+
+    def create_resume_tailoring_run(
+        self,
+        job_id: int,
+        base_template: str,
+        output_path: str | None = None,
+        status: str = "draft",
+        edits_json: str | None = None,
+    ) -> int:
+        """Create a resume tailoring run record.
+
+        Args:
+            job_id: ID of the job being tailored for.
+            base_template: Name of the LaTeX template folder.
+            output_path: Optional saved PDF path.
+            status: Run status (e.g., draft, previewed, saved, error).
+            edits_json: Optional JSON snapshot of proposed/final edits.
+
+        Returns:
+            New tailoring run ID.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO resume_tailoring_runs
+                (job_id, base_template, output_path, status, edits_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (job_id, base_template, output_path, status, edits_json),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def update_resume_tailoring_run(
+        self,
+        run_id: int,
+        output_path: str | None = None,
+        status: str | None = None,
+        edits_json: str | None = None,
+    ) -> None:
+        """Update a resume tailoring run record."""
+        updates: dict[str, Any] = {"updated_at": "CURRENT_TIMESTAMP"}
+        if output_path is not None:
+            updates["output_path"] = output_path
+        if status is not None:
+            updates["status"] = status
+        if edits_json is not None:
+            updates["edits_json"] = edits_json
+
+        set_parts = []
+        values = []
+        for field, value in updates.items():
+            if field == "updated_at":
+                set_parts.append("updated_at = CURRENT_TIMESTAMP")
+            else:
+                set_parts.append(f"{field} = ?")
+                values.append(value)
+
+        values.append(run_id)
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"UPDATE resume_tailoring_runs SET {', '.join(set_parts)} WHERE id = ?",
+            values,
+        )
+        self.conn.commit()
+
+    def get_resume_tailoring_runs_for_job(self, job_id: int) -> list[dict[str, Any]]:
+        """Get tailoring runs for a job, newest first."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM resume_tailoring_runs
+            WHERE job_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (job_id,),
+        )
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_resume_tailoring_run(self, run_id: int) -> dict[str, Any] | None:
+        """Get a single resume tailoring run by ID."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM resume_tailoring_runs WHERE id = ?", (run_id,))
+        row = cursor.fetchone()
         if row:
             columns = [desc[0] for desc in cursor.description]
             return dict(zip(columns, row))

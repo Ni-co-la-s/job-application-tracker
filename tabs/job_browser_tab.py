@@ -223,6 +223,11 @@ def render_job_browser(
                         deleted_stages = cursor.rowcount
 
                         cursor.execute(
+                            f"DELETE FROM resume_tailoring_runs WHERE job_id IN ({placeholders})",
+                            job_ids,
+                        )
+
+                        cursor.execute(
                             f"DELETE FROM jobs WHERE id IN ({placeholders})", job_ids
                         )
                         deleted_jobs = cursor.rowcount
@@ -507,6 +512,10 @@ def render_job_browser(
                             )
                             cursor.execute(
                                 "DELETE FROM interview_stages WHERE job_id = ?",
+                                (job["id"],),
+                            )
+                            cursor.execute(
+                                "DELETE FROM resume_tailoring_runs WHERE job_id = ?",
                                 (job["id"],),
                             )
                             cursor.execute(
