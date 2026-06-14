@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+from code_editor import code_editor
 from streamlit_pdf_viewer import pdf_viewer
 
 import constants
@@ -29,6 +30,29 @@ from modules.resume_templates import (
 )
 
 APPLICABLE_STATUSES = {STATUS_APPLIED_EXACT, STATUS_APPLIED_NORMALIZED_WHITESPACE}
+EDITOR_SAVE_EVENT = "submit"
+EDITOR_SAVE_BUTTONS = [
+    {
+        "name": "Save editor changes",
+        "feather": "Save",
+        "primary": True,
+        "hasText": True,
+        "showWithIcon": True,
+        "alwaysOn": True,
+        "commands": [EDITOR_SAVE_EVENT],
+        "style": {"bottom": "0.44rem", "right": "0.4rem"},
+    }
+]
+EDITOR_HIGHLIGHT_CSS = """
+.tailoring-ai-edit-marker {
+  position: absolute;
+  background-color: rgba(255, 196, 0, 0.22);
+  z-index: 5;
+}
+.ace_gutter-cell.ace_info {
+  background-color: rgba(255, 196, 0, 0.45);
+}
+"""
 
 
 def render_resume_tailoring_tab(db: JobDatabase, jobs: list[dict[str, Any]]) -> None:
@@ -124,6 +148,7 @@ def _init_state() -> None:
         "tailoring_output_name": "",
         "tailoring_raw_error": None,
         "tailoring_saved_edits_json": "[]",
+        "tailoring_applied_edit_line_ranges": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -179,6 +204,7 @@ def _generate_edits(
         )
         st.session_state.tailoring_raw_error = None
         st.session_state.tailoring_saved_edits_json = "[]"
+        st.session_state.tailoring_applied_edit_line_ranges = []
         st.session_state[_tailored_text_key(generation_id)] = preview["source_tex"]
         st.toast(f"Generated {len(edits)} edit(s).")
         st.rerun()
@@ -326,12 +352,27 @@ def _render_tailored_resume_editor() -> None:
         st.session_state[text_key] = st.session_state.tailoring_source_tex or ""
 
     with st.expander("Tailored resume (editable)", expanded=True):
-        st.text_area(
-            "Full tailored resume.tex",
-            key=text_key,
-            height=520,
-            help="Manual edits here are compiled by Build PDF preview. They are not overwritten unless you click Apply accepted edits again.",
+        st.caption(
+            "Edit the full resume.tex below, then click **Save editor changes** inside the editor "
+            "before building the PDF. Manual edits are not overwritten unless you click "
+            "Apply accepted edits again."
         )
+        current_tex = st.session_state.get(text_key, "")
+        response = code_editor(
+            current_tex,
+            lang="latex",
+            height=[25, 40],
+            buttons=EDITOR_SAVE_BUTTONS,
+            allow_reset=True,
+            key=f"tailoring_code_editor_{generation_id}",
+            props=_tailoring_editor_props(
+                current_tex,
+                st.session_state.get("tailoring_applied_edit_line_ranges", []),
+            ),
+            component_props={"css": EDITOR_HIGHLIGHT_CSS},
+            options={"showLineNumbers": True, "wrap": True},
+        )
+        _persist_editor_response(response, text_key)
 
 
 def _render_build_and_save(db: JobDatabase) -> None:
@@ -367,6 +408,8 @@ def _apply_accepted_edits_to_editor() -> None:
     updated_parts: list[str] = []
     cursor = 0
     results: list[dict] = []
+    applied_spans: list[tuple[int, int]] = []
+    output_cursor = 0
 
     accepted_applicable = [
         (index, edit)
@@ -404,8 +447,15 @@ def _apply_accepted_edits_to_editor() -> None:
         end = edit.get("matched_end")
         if start is None or end is None:
             continue
-        updated_parts.append(source_tex[cursor:start])
-        updated_parts.append(edit.get("restored_replacement", ""))
+        unchanged_segment = source_tex[cursor:start]
+        updated_parts.append(unchanged_segment)
+        output_cursor += len(unchanged_segment)
+
+        replacement = edit.get("restored_replacement", "")
+        replacement_start = output_cursor
+        updated_parts.append(replacement)
+        output_cursor += len(replacement)
+        applied_spans.append((replacement_start, output_cursor))
         cursor = end
     updated_parts.append(source_tex[cursor:])
     updated_tex = "".join(updated_parts)
@@ -413,6 +463,9 @@ def _apply_accepted_edits_to_editor() -> None:
     st.session_state[_tailored_text_key(st.session_state.tailoring_generation_id)] = (
         updated_tex
     )
+    st.session_state.tailoring_applied_edit_line_ranges = [
+        _line_range_for_span(updated_tex, start, end) for start, end in applied_spans
+    ]
     st.session_state.tailoring_apply_results = results
     st.session_state.tailoring_saved_edits_json = json.dumps(results, indent=2)
     st.session_state.tailoring_pdf_bytes = None
@@ -448,6 +501,77 @@ def _build_preview(timeout: int) -> None:
         if exc.full_log:
             with st.expander("Full LaTeX build log", expanded=True):
                 st.code(exc.full_log, language="text")
+
+
+def _persist_editor_response(response: dict | None, text_key: str) -> None:
+    """Persist code_editor text only when its explicit save/submit event fires."""
+    if not isinstance(response, dict):
+        return
+    if response.get("type") != EDITOR_SAVE_EVENT:
+        return
+
+    submitted_text = response.get("text")
+    if not submitted_text:
+        return
+
+    if submitted_text != st.session_state.get(text_key, ""):
+        st.session_state[text_key] = submitted_text
+        st.session_state.tailoring_pdf_bytes = None
+        st.toast("Editor changes saved for PDF build.")
+
+
+def _tailoring_editor_props(
+    current_tex: str, line_ranges: list[dict[str, int]]
+) -> dict[str, Any]:
+    """Build Ace props for line numbers plus applied-edit markers/annotations."""
+    return {
+        "showGutter": True,
+        "markers": _ace_markers_for_line_ranges(current_tex, line_ranges),
+        "annotations": _ace_annotations_for_line_ranges(line_ranges),
+    }
+
+
+def _ace_markers_for_line_ranges(
+    current_tex: str, line_ranges: list[dict[str, int]]
+) -> list[dict[str, Any]]:
+    line_count = max(1, current_tex.count("\n") + 1)
+    markers: list[dict[str, Any]] = []
+    for line_range in line_ranges:
+        start_line = max(1, int(line_range.get("start_line", 1)))
+        end_line = min(line_count, max(start_line, int(line_range.get("end_line", start_line))))
+        markers.append(
+            {
+                "startRow": start_line - 1,
+                "startCol": 0,
+                "endRow": end_line,
+                "endCol": 0,
+                "className": "tailoring-ai-edit-marker",
+                "type": "fullLine",
+            }
+        )
+    return markers
+
+
+def _ace_annotations_for_line_ranges(
+    line_ranges: list[dict[str, int]]
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "row": max(0, int(line_range.get("start_line", 1)) - 1),
+            "column": 0,
+            "text": "AI-applied resume edit",
+            "type": "info",
+        }
+        for line_range in line_ranges
+    ]
+
+
+def _line_range_for_span(source: str, start: int, end: int) -> dict[str, int]:
+    """Return a 1-indexed line range for a span in the post-apply source."""
+    start_line = source.count("\n", 0, start) + 1
+    end_index = max(start, end - 1)
+    end_line = source.count("\n", 0, end_index) + 1
+    return {"start_line": start_line, "end_line": end_line}
 
 
 def _save_pdf(db: JobDatabase, pdf_bytes: bytes, output_name: str) -> None:
