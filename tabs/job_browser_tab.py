@@ -79,8 +79,11 @@ def render_job_browser(
     total_pages = max(
         1, (total_count + st.session_state.page_size - 1) // st.session_state.page_size
     )
+    if st.session_state.current_page > total_pages:
+        st.session_state.current_page = 1
+        st.rerun()
 
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 2])
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 1.4, 1, 1])
 
     with col1:
         if st.button("⏮️ First", disabled=st.session_state.current_page == 1):
@@ -93,7 +96,29 @@ def render_job_browser(
             st.rerun()
 
     with col3:
-        st.markdown(f"**Page {st.session_state.current_page} of {total_pages}**")
+        page_label_col, page_input_col, page_total_col = st.columns([0.8, 1, 0.9])
+        with page_label_col:
+            st.markdown(
+                "<div style='padding-top: 0.45rem; font-weight: 700;'>Page</div>",
+                unsafe_allow_html=True,
+            )
+        with page_input_col:
+            selected_page = st.number_input(
+                "Page",
+                min_value=1,
+                max_value=total_pages,
+                value=st.session_state.current_page,
+                step=1,
+                label_visibility="collapsed",
+            )
+        with page_total_col:
+            st.markdown(
+                f"<div style='padding-top: 0.45rem; font-weight: 700;'>of {total_pages}</div>",
+                unsafe_allow_html=True,
+            )
+        if selected_page != st.session_state.current_page:
+            st.session_state.current_page = selected_page
+            st.rerun()
 
     with col4:
         if st.button("Next ▶️", disabled=st.session_state.current_page == total_pages):
