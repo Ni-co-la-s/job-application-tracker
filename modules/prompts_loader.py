@@ -30,8 +30,16 @@ def load_prompts() -> dict[str, Any]:
         return {}
 
 
-# Load prompts once when module is imported
+# Load prompts once when module is imported. They can be refreshed from the
+# Streamlit configuration UI after prompts.json is saved.
 _PROMPTS = load_prompts()
+
+
+def reload_prompts() -> dict[str, Any]:
+    """Reload prompt cache from disk and return the fresh prompt mapping."""
+    global _PROMPTS
+    _PROMPTS = load_prompts()
+    return _PROMPTS
 
 
 def get_prompt(name: str, default: str = "") -> str:

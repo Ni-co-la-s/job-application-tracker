@@ -10,11 +10,11 @@ import streamlit as st
 
 import constants
 from modules.database import JobDatabase
-from modules.llm_config import get_config_manager
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
 from tabs.job_browser_tab import get_resume_version_pdf, render_job_browser
 from tabs.scraping_tab import render_scraping_tab
+from tabs.user_files_tab import render_user_files_tab
 
 # Setup logging
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -218,8 +218,14 @@ def main() -> None:
         jobs, total_count = [], 0
 
     # Main content - Tabbed interface
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["📋 Job Browser", "🤖 AI Tools", "🔍 Scraping", "📊 Analytics"]
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        [
+            "📋 Job Browser",
+            "🤖 AI Tools",
+            "⚙️ User Config",
+            "🔍 Scraping",
+            "📊 Analytics",
+        ]
     )
 
     with tab1:
@@ -243,6 +249,15 @@ def main() -> None:
 
     with tab3:
         try:
+            render_user_files_tab(db, jobs)
+        except Exception as e:
+            st.error(f"❌ Error in User Config tab: {e}")
+            import traceback
+
+            st.code(traceback.format_exc())
+
+    with tab4:
+        try:
             render_scraping_tab()
         except Exception as e:
             st.error(f"❌ Error in Scraping tab: {e}")
@@ -250,32 +265,10 @@ def main() -> None:
 
             st.code(traceback.format_exc())
 
-    with tab4:
+    with tab5:
         render_analytics_tab(db)
 
     try:
-        # LLM Configuration Info (read-only)
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Chat Configuration")
-
-        config_manager = get_config_manager()
-        config_summary = config_manager.get_config_summary()
-
-        chat_config = config_summary.get("chat", {})
-        if chat_config.get("configured"):
-            st.sidebar.success(f"✓ {chat_config.get('model', 'Unknown')}")
-            if st.sidebar.button("🔌 Test Connection"):
-                success, message = config_manager.test_stage_connection("chat")
-                if success:
-                    st.sidebar.success(message)
-                else:
-                    st.sidebar.error(message)
-        else:
-            st.sidebar.error("❌ Not configured")
-            st.sidebar.caption(
-                "Set CHAT_API_KEY, CHAT_MODEL, and CHAT_BASE_URL in your .env file"
-            )
-
         # Export section in sidebar
         st.sidebar.markdown("---")
         st.sidebar.subheader("📥 Export")

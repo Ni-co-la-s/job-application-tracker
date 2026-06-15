@@ -51,7 +51,7 @@ class LLMConfigManager:
     """Manages per-stage LLM configurations for the application"""
 
     def __init__(self):
-        load_dotenv()
+        load_dotenv(override=True)
         self.stages = ["skills_extraction", "skills_matching", "job_scoring", "chat"]
 
         # Load configurations for all stages
@@ -159,6 +159,13 @@ class LLMConfigManager:
 
         return summary
 
+    def reload(self) -> None:
+        """Reload environment variables and rebuild all stage configs."""
+        load_dotenv(override=True)
+        self.stage_configs = {
+            stage: self._load_stage_config(stage) for stage in self.stages
+        }
+
 
 # Singleton instance
 _config_manager: Optional[LLMConfigManager] = None
@@ -169,4 +176,14 @@ def get_config_manager() -> LLMConfigManager:
     global _config_manager
     if _config_manager is None:
         _config_manager = LLMConfigManager()
+    return _config_manager
+
+
+def reload_config_manager() -> LLMConfigManager:
+    """Reload and return the singleton LLM configuration manager."""
+    global _config_manager
+    if _config_manager is None:
+        _config_manager = LLMConfigManager()
+    else:
+        _config_manager.reload()
     return _config_manager

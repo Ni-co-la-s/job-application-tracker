@@ -16,12 +16,7 @@ from pydantic import BaseModel, Field, ValidationError
 from langgraph.graph import StateGraph, END
 
 from modules.llm_config import get_config_manager
-from modules.prompts_loader import (
-    SKILLS_EXTRACTION_PROMPT,
-    SKILLS_MATCHING_PROMPT,
-    JOB_SCORING_PROMPT,
-    JOB_SCORING_SYSTEM_PROMPT,
-)
+from modules.prompts_loader import get_prompt
 from modules.database import JobDatabase
 from constants import JOBS_DB, CANDIDATE_SKILLS_FILE, RESUME_FILE
 
@@ -155,6 +150,101 @@ def clean_json_string(content: str) -> str:
     return content.strip()
 
 
+SKILLS_EXTRACTION_JSON_INSTRUCTIONS = """
+
+RETURN JSON ONLY. The output must be a single JSON object with a "skills" key containing a list of strings.
+Example:
+{
+    "skills": ["Python", "AWS", "Docker"]
+}
+"""
+
+
+SKILLS_MATCHING_JSON_INSTRUCTIONS = """
+
+RETURN JSON ONLY. Do not map skills individually. Group them into three lists: "matched", "partial", and "missing".
+
+REQUIRED JSON STRUCTURE:
+{
+    "matched": ["Skill A", "Skill B"],
+    "partial": ["Skill C"],
+    "missing": ["Skill D", "Skill E"]
+}
+"""
+
+
+def build_skills_extraction_prompt(description: str) -> str:
+    """Build the prompt for skills extraction."""
+    base_prompt = get_prompt("SKILLS_EXTRACTION_PROMPT", "").format(
+        description=description
+    )
+    return base_prompt + SKILLS_EXTRACTION_JSON_INSTRUCTIONS
+
+
+def build_skills_matching_prompt(
+    candidate_skills: list[str], job_skills: list[str]
+) -> str:
+    """Build the prompt for skills matching."""
+    base_prompt = (
+        get_prompt("SKILLS_MATCHING_PROMPT", "")
+        .replace("{candidate_skills}", json.dumps(candidate_skills))
+        .replace("{job_skills}", json.dumps(job_skills))
+    )
+    return base_prompt + SKILLS_MATCHING_JSON_INSTRUCTIONS
+
+
+def parse_skills_match_content(content: str) -> SkillsMatch:
+    """Parse skills matching output.
+
+    Preferred shape:
+        {"matched": [...], "partial": [...], "missing": [...]}
+
+    Some models instead return:
+        {"Python": "matched", "Azure": "missing"}
+
+    """
+    cleaned = clean_json_string(content)
+
+    try:
+        return SkillsMatch.model_validate_json(cleaned)
+    except ValidationError:
+        data = json.loads(cleaned)
+
+    if not isinstance(data, dict):
+        raise ValueError("Skills matching output must be a JSON object")
+
+    grouped = {"matched": [], "partial": [], "missing": []}
+    aliases = {
+        "match": "matched",
+        "matched": "matched",
+        "exact": "matched",
+        "partial": "partial",
+        "partially matched": "partial",
+        "missing": "missing",
+        "miss": "missing",
+        "not matched": "missing",
+        "unmatched": "missing",
+    }
+
+    # Accept grouped keys.
+    if any(key in data for key in grouped):
+        for key in grouped:
+            value = data.get(key, [])
+            if isinstance(value, list):
+                grouped[key].extend(str(item) for item in value)
+            elif isinstance(value, str):
+                grouped[key].append(value)
+        return SkillsMatch(**grouped)
+
+    # Accept dictionary mapping of skill name -> category.
+    for skill, category in data.items():
+        normalized_category = aliases.get(str(category).strip().lower())
+        if normalized_category:
+            grouped[normalized_category].append(str(skill))
+
+    return SkillsMatch(**grouped)
+
+
 # ============= Node Functions =============
 
 
@@ -216,63 +306,32 @@ async def skills_extraction(state: PipelineState) -> PipelineState:
             state["should_continue"] = False
             return state
 
-        prompt = SKILLS_EXTRACTION_PROMPT.format(description=description)
+        prompt = build_skills_extraction_prompt(description)
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=config.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a useful assistant. Output valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+
+        content = clean_json_string(response.choices[0].message.content or "")
 
         try:
-            # 1. Try OpenAI Structured Outputs (Strict Mode)
-            response = await asyncio.to_thread(
-                client.beta.chat.completions.parse,
-                model=config.model,
-                messages=[
-                    {"role": "system", "content": "You are a useful assistant"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=1000,
-                response_format=SkillsExtraction,
+            skills_data = SkillsExtraction.model_validate_json(content)
+        except ValidationError:
+            # If model returned bad JSON, log it and return empty
+            logger.warning(
+                f"Failed to parse JSON from {config.model}: {content[:100]}..."
             )
-            skills_data = response.choices[0].message.parsed
-
-        except Exception:
-            # 2. Fallback: Standard JSON Mode (DeepSeek, Local, etc.)
-            fallback_prompt = (
-                prompt
-                + """
-            
-            RETURN JSON ONLY. The output must be a single JSON object with a "skills" key containing a list of strings.
-            Example:
-            {
-                "skills": ["Python", "AWS", "Docker"]
-            }
-            """
-            )
-
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=config.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a useful assistant. Output valid JSON.",
-                    },
-                    {"role": "user", "content": fallback_prompt},
-                ],
-                temperature=0.1,
-                max_tokens=1000,
-                response_format={"type": "json_object"},
-            )
-
-            content = response.choices[0].message.content
-            content = clean_json_string(content)
-
-            try:
-                skills_data = SkillsExtraction.model_validate_json(content)
-            except ValidationError:
-                # If model returned bad JSON, log it and return empty
-                logger.warning(
-                    f"Failed to parse JSON from {config.model}: {content[:100]}..."
-                )
-                skills_data = SkillsExtraction(skills=[])
+            skills_data = SkillsExtraction(skills=[])
 
         state["extracted_skills"] = skills_data.skills
         logger.debug(f"Extracted {len(skills_data.skills)} skills")
@@ -318,67 +377,31 @@ async def skills_matching(state: PipelineState) -> PipelineState:
             state["should_continue"] = False
             return state
 
-        prompt = SKILLS_MATCHING_PROMPT.replace(
-            "{candidate_skills}", json.dumps(candidate_skills)
-        ).replace("{job_skills}", json.dumps(job_skills))
+        prompt = build_skills_matching_prompt(candidate_skills, job_skills)
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=config.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a useful assistant. Output valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+
+        content = clean_json_string(response.choices[0].message.content or "")
 
         try:
-            # 1. Try OpenAI Structured Outputs
-            response = await asyncio.to_thread(
-                client.beta.chat.completions.parse,
-                model=config.model,
-                messages=[
-                    {"role": "system", "content": "You are a useful assistant"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=1000,
-                response_format=SkillsMatch,
+            match_result = parse_skills_match_content(content)
+        except (ValidationError, ValueError, json.JSONDecodeError):
+            logger.warning(
+                f"Failed to parse JSON from {config.model} : {content[:1000]}..."
             )
-            match_result = response.choices[0].message.parsed
-
-        except Exception:
-            # 2. Fallback: Standard JSON Mode
-            fallback_prompt = (
-                prompt
-                + """
-            
-            RETURN JSON ONLY. Do not map skills individually. Group them into three lists: "matched", "partial", and "missing".
-            
-            REQUIRED JSON STRUCTURE:
-            {
-                "matched": ["Skill A", "Skill B"],
-                "partial": ["Skill C"],
-                "missing": ["Skill D", "Skill E"]
-            }
-            """
-            )
-
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=config.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a useful assistant. Output valid JSON.",
-                    },
-                    {"role": "user", "content": fallback_prompt},
-                ],
-                temperature=0.1,
-                max_tokens=1000,
-                response_format={"type": "json_object"},
-            )
-
-            content = response.choices[0].message.content
-            content = clean_json_string(content)
-
-            try:
-                match_result = SkillsMatch.model_validate_json(content)
-            except ValidationError:
-                logger.warning(
-                    f"Failed to parse JSON from {config.model} : {content[:1000]}..."
-                )
-                match_result = SkillsMatch(matched=[], partial=[], missing=[])
+            match_result = SkillsMatch(matched=[], partial=[], missing=[])
 
         state["match_result"] = match_result
         state["heuristic_score"] = calculate_heuristic_score(match_result)
@@ -435,7 +458,7 @@ async def job_scoring(state: PipelineState) -> PipelineState:
             return state
 
         # Use safe_str to handle NaN, None, floats for all fields
-        prompt = JOB_SCORING_PROMPT.format(
+        prompt = get_prompt("JOB_SCORING_PROMPT", "").format(
             resume=resume,
             title=safe_str(job_data.get("title", ""), "Unknown"),
             company=safe_str(job_data.get("company", ""), "Unknown"),
@@ -450,7 +473,10 @@ async def job_scoring(state: PipelineState) -> PipelineState:
             client.chat.completions.create,
             model=config.model,
             messages=[
-                {"role": "system", "content": JOB_SCORING_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": get_prompt("JOB_SCORING_SYSTEM_PROMPT", ""),
+                },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
