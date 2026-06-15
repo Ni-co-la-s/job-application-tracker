@@ -11,6 +11,7 @@ import streamlit as st
 
 import constants
 from modules.database import JobDatabase
+from modules.prompts_loader import reload_prompts
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
 from tabs.job_browser_tab import get_resume_version_pdf, render_job_browser
@@ -107,6 +108,8 @@ def startup_check() -> bool:
             st.error(f"   - {filepath} ({description}); expected template: {example_path}")
         st.info("Please restore the missing .example files from the repository.")
         return False
+
+    reload_prompts()
 
     # Create required directories
     Path(constants.RESUME_FINAL_DIR).mkdir(parents=True, exist_ok=True)
