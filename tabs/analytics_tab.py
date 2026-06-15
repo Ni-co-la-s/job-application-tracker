@@ -175,7 +175,11 @@ def render_analytics_tab(db: JobDatabase) -> None:
                             col1, col2 = st.columns(2)
                             with col1:
                                 if st.form_submit_button("💾 Update", width="stretch"):
-                                    if not edit_name or not edit_sql or not edit_description:
+                                    if (
+                                        not edit_name
+                                        or not edit_sql
+                                        or not edit_description
+                                    ):
                                         st.error("All fields are required")
                                     elif (
                                         edit_name != query_to_edit
