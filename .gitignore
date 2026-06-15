@@ -27,9 +27,13 @@ uv.lock
 
 # User configuration (keep .example files)
 config/*.txt
+config/*.json
+!config/*.json.example
 
 # User data
-Resumes/final/*.pdf
+Resumes/**
+!Resumes/**/
+!Resumes/**/.gitkeep
 CoverLetters/
 
 # IDE
