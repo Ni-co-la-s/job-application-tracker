@@ -9,7 +9,7 @@
     "system_prompt": "",
     "user_prompt": "Analyze {title} at {company}:\n{description}\n\nSuggest which experiences to emphasize."
   },
-  "Cover Letter Help": {
+  "cover_letter_help": {
     "name": "Cover Letter Help",
     "system_prompt": "You are a career advisor helping with cover letters.",
     "user_prompt": "Write me a cover letter for:\n\nTitle: {title}\nCompany: {company}\nDescription : {description}\n"

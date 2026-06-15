@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -56,25 +57,54 @@ def startup_check() -> bool:
         st.info("Please create a 'config' directory with the required files.")
         return False
 
-    # Check required custom config files
-    required_files = [
-        ("config/prompts.json", "prompts configuration"),
-        ("config/resume.txt", "resume text file"),
-        ("config/candidate_skills.txt", "candidate skills text file"),
-        ("config/searches.txt", "searches text file"),
-        ("config/interview_stages.json", "interview stages configuration"),
+    # Create missing local files from tracked examples.
+    example_backed_files = [
+        (".env", ".env.example", "environment variables"),
+        ("config/prompts.json", "config/prompts.json.example", "prompts configuration"),
+        ("config/resume.txt", "config/resume.txt.example", "resume text file"),
+        (
+            "config/candidate_skills.txt",
+            "config/candidate_skills.txt.example",
+            "candidate skills text file",
+        ),
+        ("config/searches.txt", "config/searches.txt.example", "searches text file"),
+        (
+            "config/interview_stages.json",
+            "config/interview_stages.json.example",
+            "interview stages configuration",
+        ),
+        ("config/presets.json", "config/presets.json.example", "chat presets"),
+        ("config/queries.json", "config/queries.json.example", "analytics queries"),
     ]
 
     missing_files = []
-    for filepath, description in required_files:
-        if not Path(filepath).exists():
-            missing_files.append((filepath, description))
+    created_files = []
+    for filepath, example_path, description in example_backed_files:
+        target = Path(filepath)
+        example = Path(example_path)
+        if target.exists():
+            continue
+        if example.exists():
+            shutil.copyfile(example, target)
+            created_files.append(filepath)
+        else:
+            missing_files.append((filepath, description, example_path))
+
+    if created_files:
+        st.info(
+            "Created missing local files from .example templates: "
+            + ", ".join(created_files)
+        )
+        if ".env" in created_files:
+            st.warning(
+                "Please fill .env with real API keys, models, and base URLs in the file or in User Config → LLM Settings before using LLM features."
+            )
 
     if missing_files:
-        st.error("❌ Missing required configuration files:")
-        for filepath, description in missing_files:
-            st.error(f"   - {filepath} ({description})")
-        st.info("Please copy the .example files from config/ and customize them.")
+        st.error("❌ Missing required configuration templates:")
+        for filepath, description, example_path in missing_files:
+            st.error(f"   - {filepath} ({description}); expected template: {example_path}")
+        st.info("Please restore the missing .example files from the repository.")
         return False
 
     # Create required directories

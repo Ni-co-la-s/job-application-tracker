@@ -74,7 +74,11 @@ pip install -e .
 
 3. **Initialize Configuration**
 
-Copy the provided example files and populate them with your data:
+On first dashboard startup, missing user files are automatically created from tracked `.example` templates.
+
+This includes `.env` and the files in `config/`. Afterwards, you can edit `.env` real API keys, model names, and base URLs either directly in the file or from the dashboard's **User Config → LLM Settings** tab before LLM calls will work.
+
+If you prefer to initialize files manually before the first run:
 
 ```bash
 # Windows
@@ -93,9 +97,9 @@ Those will not be passed to LLMs.
 
 ## Configuration
 
-The system relies on several plain-text files in the `config/` directory to personalize the matching logic:
+The system relies on local files in the `config/` directory to personalize the matching logic. You can modify them to match your expectations.
 
-- **searches.txt**: Define job searches using `job_title|location|country` (or `job_title|location|country|linkedin_company_ids`).
+- **searches.txt**: Define job searches using `job_title|location|country` (or `job_title|location|country|linkedin_company_ids`). Can be modified in the **Scraping** tab of the dashboard.
   - Example: `Test engineer|Berlin|Germany`
   - LinkedIn company-targeted example: `Data Scientist|Berlin|Germany|1441,1035`
   - `linkedin_company_ids` is optional and must be comma-separated integers.
@@ -106,13 +110,12 @@ The system relies on several plain-text files in the `config/` directory to pers
     - only `location` is used for LinkedIn and ZipRecruiter
     - `country` is used for Indeed and Glassdoor, `location` helps narrowing down (supported countries: https://github.com/speedyapply/JobSpy?tab=readme-ov-file#supported-countries-for-job-searching)
   - Important: if you use LinkedIn-specific cluster values (like `Latin America|worldwide`) while also scraping Indeed/Glassdoor in the same run, Indeed/Glassdoor may return no results for those entries.
-- **resume.txt**: Your resume in plain text for LLM processing. This is different from the resumes in Resumes/final/ and will be passed to LLMs when scoring the jobs found.
-- **candidate_skills.txt**: A list of your primary technical skills (one per line). The skills extracted from the jobs will then be matched to them.
-- **prompts.json**: Contains the prompts for extraction and scoring logic. 
-- **presets.json**: Saved prompt templates for the AI Chat interface. Those can be changed from the UI directly
-- **queries.json**: Saved SQL analytics queries with their recommended visualization type and description. Those can be changed from the Analytics UI directly.
-- **interview_stages.json**: Customizable interview stages for tracking application stages (refusal, offers, phone screening...). You can modify, add, or remove stages to match your interview process.
-
+- **resume.txt**: Your resume in plain text for LLM processing. This is different from the resumes in Resumes/final/ and will be passed to LLMs when scoring the jobs found. Can be modified in the **User Config → Profile Files** tab of the dashboard.
+- **candidate_skills.txt**: A list of your primary technical skills (one per line). The skills extracted from the jobs will then be matched to them. Can be modified in the **User Config → Profile Files** tab of the dashboard.
+- **prompts.json**: Contains the prompts for extraction, matching, and scoring logic. Can be modified in the **User Config → Prompts** tab of the dashboard.
+- **presets.json**: Saved prompt templates for the AI Chat interface. Can be modified in the **AI Tools** tab of the dashboard.
+- **queries.json**: Saved SQL analytics queries with their recommended visualization type and description. Can be modified in the **Analytics** tab of the dashboard.
+- **interview_stages.json**: Interview stages for tracking application stages (refusal, offers, phone screening...). Defaults are created from `interview_stages.json.example`. Be careful changing this after you have saved stages in the database.
 ## Usage
 
 ### Streamlit Dashboard
