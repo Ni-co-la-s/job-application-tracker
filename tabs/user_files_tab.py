@@ -13,8 +13,14 @@ from modules.llm_config import get_config_manager, reload_config_manager
 from modules.prompt_testing import (
     run_extraction_and_matching_preview,
     run_job_scoring_preview,
+    run_resume_tailoring_preview,
 )
 from modules.prompts_loader import load_prompts, reload_prompts
+from modules.resume_editing import (
+    STATUS_APPLIED_EXACT,
+    STATUS_APPLIED_NORMALIZED_WHITESPACE,
+)
+from modules.resume_templates import list_latex_templates
 
 
 ENV_FILE = Path(".env")
@@ -34,6 +40,10 @@ LLM_STAGES = {
     "chat": {
         "label": "Chat",
         "description": "Powers the conversational AI Tools tab and preset-based job chat.",
+    },
+    "resume_tailoring": {
+        "label": "Resume Tailoring",
+        "description": "Generates search/replacement edits for tailoring LaTeX resumes to selected jobs.",
     },
 }
 
@@ -261,6 +271,97 @@ def _render_result_block(title: str, result: dict[str, Any] | None) -> None:
         st.json(result["parsed"])
 
 
+def _render_colored_block(value: str, background: str, color: str) -> None:
+    escaped = (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    st.markdown(
+        f"<div style='background:{background};color:{color};padding:0.75rem;"
+        f"border-radius:0.4rem;white-space:pre-wrap'>{escaped}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_resume_tailoring_test_result(result: dict[str, Any] | None) -> None:
+    st.markdown("#### Resume tailoring")
+    if result is None:
+        st.warning("No result produced.")
+        return
+
+    if result.get("error"):
+        st.error(result["error"])
+
+    messages = result.get("messages", [])
+    for message in messages:
+        label = "System prompt" if message.get("role") == "system" else "User prompt"
+        with st.expander(label, expanded=False):
+            st.code(message.get("content", ""), language="text")
+
+    metadata = [f"Stage: `{result.get('stage', 'resume_tailoring')}`"]
+    if result.get("model"):
+        metadata.append(f"Model: `{result['model']}`")
+    if result.get("template"):
+        metadata.append(f"Template: `{result['template']}`")
+    st.caption(" • ".join(metadata))
+
+    if "redacted_body" in result:
+        with st.expander("Resume sent to model", expanded=False):
+            st.code(result["redacted_body"], language="latex")
+            count = result.get("redaction_count", 0)
+            st.caption(
+                f"{count} string(s) redacted. config/resume.txt is sent to the model as-is by the tailoring prompt."
+            )
+
+    if "raw_output" in result:
+        with st.expander("Raw model output", expanded=True):
+            st.code(result["raw_output"], language="text")
+
+    if "parse_error" in result:
+        st.warning(f"Parse warning: {result['parse_error']}")
+
+    edits = result.get("parsed", {}).get("edits", [])
+    if not edits:
+        if not result.get("error"):
+            st.info("The model returned no edits.")
+        return
+
+    st.markdown("**Proposed edits**")
+    applicable_statuses = {STATUS_APPLIED_EXACT, STATUS_APPLIED_NORMALIZED_WHITESPACE}
+    for index, edit in enumerate(edits):
+        reason = edit.get("reason") or "No reason"
+        with st.expander(f"Edit {index + 1}: {reason}", expanded=True):
+            status = edit.get("apply_status", "unknown")
+            message = edit.get("apply_message", "")
+            if status in applicable_statuses:
+                st.success(f"Status: `{status}` — {message}")
+                if edit.get("matched_start_line") and edit.get("matched_end_line"):
+                    st.caption(
+                        f"Matched lines {edit['matched_start_line']}–{edit['matched_end_line']} in the full resume.tex file."
+                    )
+            else:
+                st.warning(f"Status: `{status}` — {message}")
+
+            col_search, col_replacement = st.columns(2)
+            with col_search:
+                st.markdown("**Search**")
+                _render_colored_block(
+                    edit.get("restored_search") or edit.get("search", ""),
+                    "#4a1515",
+                    "#ffd8d8",
+                )
+            with col_replacement:
+                st.markdown("**Replacement**")
+                _render_colored_block(
+                    edit.get("restored_replacement") or edit.get("replacement", ""),
+                    "#123d22",
+                    "#d8ffe5",
+                )
+            st.caption(f"Reason: {reason}")
+
+
 def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
     st.subheader("Prompt Testing")
     st.info(
@@ -285,12 +386,26 @@ def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
     with st.expander("Selected job description", expanded=False):
         st.markdown(selected_job.get("description") or "No description available")
 
+    test_options = ["Skills extraction + matching", "Job scoring", "Resume tailoring"]
     test_type = st.radio(
         "Prompt test",
-        ["Skills extraction + matching", "Job scoring"],
+        test_options,
         horizontal=True,
         key="prompt_test_type",
     )
+
+    selected_template = None
+    if test_type == "Resume tailoring":
+        templates = list_latex_templates()
+        if templates:
+            selected_template = st.selectbox(
+                "📄 Select LaTeX template",
+                templates,
+                key="prompt_test_resume_template",
+            )
+        else:
+            st.warning(f"No LaTeX templates found in `{constants.RESUME_TEX_DIR}`.")
+
     if st.button("▶️ Run prompt test", type="primary", key="run_prompt_test"):
         with st.spinner("Running prompt test..."):
             if test_type == "Skills extraction + matching":
@@ -298,11 +413,20 @@ def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
                     "type": test_type,
                     "result": run_extraction_and_matching_preview(selected_job),
                 }
-            else:
+            elif test_type == "Job scoring":
                 st.session_state.prompt_test_result = {
                     "type": test_type,
                     "result": run_job_scoring_preview(selected_job),
                 }
+            elif selected_template:
+                st.session_state.prompt_test_result = {
+                    "type": test_type,
+                    "result": run_resume_tailoring_preview(
+                        selected_job, selected_template
+                    ),
+                }
+            else:
+                st.error("Select a LaTeX template before running resume tailoring.")
 
     saved = st.session_state.get("prompt_test_result")
     if not saved:
@@ -314,8 +438,10 @@ def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
     if saved["type"] == "Skills extraction + matching":
         _render_result_block("Skills extraction", result.get("extraction"))
         _render_result_block("Skills matching", result.get("matching"))
-    else:
+    elif saved["type"] == "Job scoring":
         _render_result_block("Job scoring", result)
+    else:
+        _render_resume_tailoring_test_result(result)
 
 
 def render_user_files_tab(db: Any, jobs: list[dict[str, Any]]) -> None:

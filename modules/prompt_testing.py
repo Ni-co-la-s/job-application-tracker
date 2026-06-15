@@ -21,6 +21,18 @@ from modules.langgraph_pipeline import (
 )
 from modules.llm_config import get_config_manager
 from modules.prompts_loader import get_prompt
+from modules.resume_editing import match_edit_once
+from modules.resume_redaction import build_redaction_map, redact, restore
+from modules.resume_tailoring import (
+    ResumeEditList,
+    ResumeTailoringError,
+    read_information_bank,
+)
+from modules.resume_templates import (
+    extract_document_body,
+    get_template_dir,
+    read_template_tex,
+)
 
 
 def read_candidate_skills() -> list[str]:
@@ -191,3 +203,120 @@ def run_job_scoring_preview(job: dict[str, Any]) -> dict[str, Any]:
         reasoning = reasoning_match.group(1).strip()
     result["parsed"] = {"score": score, "reasoning": reasoning}
     return result
+
+
+def run_resume_tailoring_preview(
+    job: dict[str, Any], template_name: str
+) -> dict[str, Any]:
+    """Generate and review resume tailoring edits for prompt testing only."""
+    result: dict[str, Any] = {
+        "stage": "resume_tailoring",
+        "template": template_name,
+    }
+
+    config_manager = get_config_manager()
+    config = config_manager.get_config_for_stage("resume_tailoring")
+    client = config_manager.get_client_for_stage("resume_tailoring")
+    if config:
+        result["model"] = config.model
+
+    try:
+        if not config or not client or not config.api_key or not config.model:
+            raise ResumeTailoringError(
+                "Resume Tailoring LLM is not configured. Set RESUME_TAILORING_API_KEY, "
+                "RESUME_TAILORING_MODEL, and RESUME_TAILORING_BASE_URL in your .env file."
+            )
+
+        source_tex = read_template_tex(template_name)
+        current_resume_body = extract_document_body(source_tex)
+        redaction_map = _load_template_redactions(template_name)
+        redacted_body = redact(current_resume_body, redaction_map)
+        user_prompt = get_prompt("RESUME_TAILORING_PROMPT", "").format(
+            information_bank=read_information_bank(),
+            current_resume=redacted_body,
+            title=safe_str(job.get("title"), "Unknown"),
+            company=safe_str(job.get("company"), "Unknown"),
+            location=safe_str(job.get("location"), "Not specified"),
+            description=safe_str(job.get("description"), "No description available"),
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a careful resume editor. Output only valid JSON.",
+            },
+            {"role": "user", "content": user_prompt},
+        ]
+
+        result.update(
+            {
+                "redacted_body": redacted_body,
+                "redaction_count": len(redaction_map),
+                "messages": messages,
+            }
+        )
+
+        response = client.chat.completions.create(
+            model=config.model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=config.max_tokens,
+        )
+        raw_output = response.choices[0].message.content or ""
+        result["raw_output"] = raw_output
+
+        try:
+            parsed = json.loads(clean_json_string(raw_output))
+            edit_list = ResumeEditList.model_validate(parsed)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            result["parse_error"] = str(exc)
+            raise ResumeTailoringError(
+                f"Could not parse resume tailoring JSON: {exc}",
+                raw_output=raw_output,
+            ) from exc
+
+        result["parsed"] = {
+            "edits": _review_tailoring_preview_edits(
+                source_tex, edit_list.edits, redaction_map
+            )
+        }
+    except ResumeTailoringError as exc:
+        result["error"] = str(exc)
+        if exc.raw_output:
+            result["raw_output"] = exc.raw_output
+    except FileNotFoundError as exc:
+        result["error"] = f"Required file not found: {exc}"
+    except Exception as exc:
+        result["error"] = f"Unexpected resume tailoring prompt-test error: {exc}"
+
+    return result
+
+
+def _load_template_redactions(template_name: str) -> dict[str, str]:
+    path = get_template_dir(template_name) / "pii_redactions.txt"
+    if not path.exists():
+        return {}
+    return build_redaction_map(path.read_text(encoding="utf-8").splitlines())
+
+
+def _review_tailoring_preview_edits(
+    source_tex: str, edits: list[Any], redaction_map: dict[str, str]
+) -> list[dict[str, Any]]:
+    reviewed: list[dict[str, Any]] = []
+    for index, edit in enumerate(edits):
+        edit_data = edit.model_dump()
+        restored_search = restore(edit_data.get("search", ""), redaction_map)
+        restored_replacement = restore(edit_data.get("replacement", ""), redaction_map)
+        match = match_edit_once(source_tex, restored_search)
+        reviewed.append(
+            {
+                **edit_data,
+                "edit_index": index,
+                "restored_search": restored_search,
+                "restored_replacement": restored_replacement,
+                "apply_status": match.status,
+                "apply_message": match.message,
+                "matched_start_line": match.start_line,
+                "matched_end_line": match.end_line,
+            }
+        )
+    return reviewed
