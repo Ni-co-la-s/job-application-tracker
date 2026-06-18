@@ -488,12 +488,23 @@ def render_job_browser(
                             st.session_state.editing_job_id = job["id"]
                             st.rerun()
 
+                        is_archived = bool(job.get("archived", 0))
+                        archive_label = "📤" if is_archived else "📦"
+                        archive_help = (
+                            "Unarchive this job" if is_archived else "Archive this job"
+                        )
                         if st.button(
-                            "📦", key=f"archive_{job['id']}", help="Archive this job"
+                            archive_label,
+                            key=f"archive_{job['id']}",
+                            help=archive_help,
                         ):
-                            db.archive_job(job["id"])
-                            st.session_state.selected_jobs.discard(job["id"])
-                            st.toast("Archived!")
+                            if is_archived:
+                                db.unarchive_job(job["id"])
+                                st.toast("Unarchived!")
+                            else:
+                                db.archive_job(job["id"])
+                                st.session_state.selected_jobs.discard(job["id"])
+                                st.toast("Archived!")
                             st.rerun()
 
                         if st.button(
