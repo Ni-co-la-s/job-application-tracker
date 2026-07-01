@@ -268,8 +268,6 @@ def render_analytics_tab(db: JobDatabase) -> None:
         if run_query:
             if not query_text or query_text.strip() == "":
                 st.warning("⚠️ Please enter a SQL query first")
-            elif not query_text.strip().upper().startswith("SELECT"):
-                st.error("❌ Only SELECT queries are allowed for security reasons")
             else:
                 execute_query_with_viz(ro_conn, query_text, viz_type)
         elif st.session_state.get("last_result") is not None:
