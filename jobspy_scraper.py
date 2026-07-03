@@ -249,6 +249,7 @@ def main() -> None:
             "job_url_direct": row.get("job_url_direct"),
             "title": row.get("title"),
             "company": row.get("company"),
+            "company_linkedin_id": row.get("company_linkedin_id"),
             "location": row.get("location"),
             "date_posted": row.get("date_posted"),
             "job_type": row.get("job_type"),

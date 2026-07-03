@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "streamlit>=1.52.2",
     "pandas>=2.3.3",
-    "python-jobspy>=1.1.82",
+    "python-jobspy @ https://github.com/Ni-co-la-s/JobSpy/archive/refs/heads/main.zip",
     "langgraph>=1.0.5",
     "openai>=2.13.0",
     "plotly>=6.5.0",
@@ -18,6 +18,9 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]

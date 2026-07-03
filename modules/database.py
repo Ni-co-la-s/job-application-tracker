@@ -35,6 +35,7 @@ class JobDatabase:
                 job_url_direct TEXT,
                 title TEXT,
                 company TEXT,
+                company_linkedin_id INTEGER,
                 location TEXT,
                 date_posted DATE,
                 date_scraped DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +71,8 @@ class JobDatabase:
                 archived BOOLEAN DEFAULT 0
             )
         """)
+
+        self._ensure_column("jobs", "company_linkedin_id", "INTEGER")
 
         # Applications table
         cursor.execute("""
@@ -137,6 +140,15 @@ class JobDatabase:
 
         self.conn.commit()
 
+    def _ensure_column(self, table: str, column: str, column_definition: str) -> None:
+        """Add a column to an existing SQLite table if it is missing for migrations."""
+        cursor = self.conn.cursor()
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_definition}")
+            self.conn.commit()
+
     def insert_job(self, job_data: dict[str, Any]) -> int:
         """Insert or update a job.
 
@@ -165,6 +177,7 @@ class JobDatabase:
                 "job_url_direct",
                 "title",
                 "company",
+                "company_linkedin_id",
                 "location",
                 "date_posted",
                 "job_type",

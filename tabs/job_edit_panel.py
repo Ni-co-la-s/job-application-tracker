@@ -185,6 +185,7 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
         col1, col2 = st.columns(2)
         with col1:
             st.text(f"ID: {job['id']}")
+            st.text(f"Company Linkedin ID: {job['company_linkedin_id']}")
             st.text(f"Date Scraped: {job.get('date_scraped', 'N/A')}")
             st.text(f"LLM Score: {job.get('llm_score', 'N/A')}")
             st.text(f"Heuristic Score: {job.get('heuristic_score', 'N/A')}")
