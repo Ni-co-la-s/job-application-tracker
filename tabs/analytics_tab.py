@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from code_editor import code_editor
 
 from constants import QUERIES_FILE
 from modules.database import JobDatabase
@@ -22,6 +23,27 @@ VIZ_TYPES = {
     "line": "📈 Line Chart",
     "metric": "🎯 Metric Cards",
 }
+
+SQL_EDITOR_OPTIONS = {
+    "showLineNumbers": True,
+    "wrap": True,
+    "enableBasicAutocompletion": True,
+    "enableLiveAutocompletion": True,
+    "enableSnippets": True,
+}
+SQL_EDITOR_RUN_EVENT = "submit"
+SQL_EDITOR_RUN_BUTTONS = [
+    {
+        "name": "Run Query",
+        "feather": "Play",
+        "primary": True,
+        "hasText": True,
+        "showWithIcon": True,
+        "alwaysOn": True,
+        "commands": [SQL_EDITOR_RUN_EVENT],
+        "style": {"bottom": "0.44rem", "right": "0.4rem"},
+    }
+]
 
 
 def save_queries() -> None:
@@ -226,13 +248,23 @@ def render_analytics_tab(db: JobDatabase) -> None:
         if "query_version" not in st.session_state:
             st.session_state.query_version = 0
 
-        query_text = st.text_area(
-            "Enter your query",
-            value=st.session_state.current_query,
-            height=200,
-            placeholder="SELECT * FROM jobs LIMIT 10",
+        st.caption("Enter your query")
+        query_response = code_editor(
+            st.session_state.current_query,
+            lang="sql",
+            height=[12, 20],
+            buttons=SQL_EDITOR_RUN_BUTTONS,
+            allow_reset=True,
             key=f"query_editor_input_{st.session_state.query_version}",  # Dynamic key forces re-render
+            options=SQL_EDITOR_OPTIONS,
         )
+        query_text = st.session_state.current_query
+        run_query = _is_code_editor_run_event(query_response)
+        if run_query:
+            query_text = _extract_code_editor_text(
+                query_response, st.session_state.current_query
+            )
+            st.session_state.current_query = query_text
 
         st.divider()
 
@@ -258,8 +290,7 @@ def render_analytics_tab(db: JobDatabase) -> None:
 
         st.divider()
 
-        # Run button
-        run_query = st.button("▶️ Run Query", type="primary", width="stretch")
+        st.caption("Use the editor's **Run Query** button to execute the current SQL.")
 
     # ==================== RIGHT COLUMN: Results ====================
     with col_right:
@@ -292,13 +323,31 @@ def render_analytics_tab(db: JobDatabase) -> None:
         ro_conn.close()
 
 
+def _extract_code_editor_text(response: dict | None, fallback: str) -> str:
+    """Return the current text from streamlit-code-editor response data.
+
+    Args:
+        response: Raw response emitted by streamlit-code-editor.
+        fallback: Text to use before the editor has emitted a response.
+    """
+    if not isinstance(response, dict):
+        return fallback
+    text = response.get("text")
+    return text if isinstance(text, str) else fallback
+
+
+def _is_code_editor_run_event(response: dict | None) -> bool:
+    """Return True when the SQL editor's Run Query button was pressed."""
+    return isinstance(response, dict) and response.get("type") == SQL_EDITOR_RUN_EVENT
+
+
 def render_schema_reference(conn: Any) -> None:
     """Render database schema with examples.
 
     Args:
         conn: Database connection.
     """
-    tables = ["jobs", "applications", "interview_stages"]
+    tables = ["jobs", "applications", "interview_stages", "resume_tailoring_runs"]
 
     for table in tables:
         with st.expander(f"📋 **{table}**"):
@@ -306,6 +355,10 @@ def render_schema_reference(conn: Any) -> None:
             cursor = conn.cursor()
             cursor.execute(f"PRAGMA table_info({table})")
             columns = cursor.fetchall()
+
+            if not columns:
+                st.info("This table is not present in the current database yet.")
+                continue
 
             # Get row count
             cursor.execute(f"SELECT COUNT(*) FROM {table}")
