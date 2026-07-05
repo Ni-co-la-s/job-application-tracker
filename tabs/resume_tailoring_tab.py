@@ -388,14 +388,17 @@ def _render_build_and_save(db: JobDatabase) -> None:
         st.success("PDF compiled successfully. Review it before saving.")
         pdf_viewer(input=pdf_bytes)
 
-        output_name = st.text_input(
-            "Output filename",
-            value=st.session_state.tailoring_output_name,
-            help="Saved under Resumes/final/ after approval.",
-        )
-        st.session_state.tailoring_output_name = output_name
+        with st.form("tailoring_save_pdf_form"):
+            output_name = st.text_input(
+                "Output filename",
+                value=st.session_state.tailoring_output_name,
+                help="Saved under Resumes/final/ after approval.",
+                key="tailoring_output_name_input",
+            )
+            save_submitted = st.form_submit_button("✅ Approve & save", type="primary")
 
-        if st.button("✅ Approve & save", type="primary"):
+        if save_submitted:
+            st.session_state.tailoring_output_name = output_name
             _save_pdf(db, pdf_bytes, output_name)
 
 
