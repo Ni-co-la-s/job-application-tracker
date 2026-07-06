@@ -60,6 +60,7 @@ def render_analytics_tab(db: JobDatabase) -> None:
     # Schema reference at top (collapsible)
     with st.expander("📚 Database Schema Reference"):
         render_schema_reference(ro_conn)
+    sql_completions = get_sql_editor_completions(ro_conn)
 
     # Main layout: left sidebar with queries, right area with results
     col_left, col_right = st.columns([1, 2])
@@ -244,6 +245,7 @@ def render_analytics_tab(db: JobDatabase) -> None:
             allow_reset=True,
             key=f"query_editor_input_{st.session_state.query_version}",
             options=SQL_EDITOR_OPTIONS,
+            completions=sql_completions,
             response_mode=["debounce", "blur"],
         )
         if _has_code_editor_text(query_response):
@@ -314,6 +316,47 @@ def _has_code_editor_text(response: dict | None) -> bool:
         and response.get("type") in {"change", "blur"}
         and isinstance(response.get("text"), str)
     )
+
+
+def get_sql_editor_completions(conn: Any) -> list[dict[str, Any]]:
+    """Build autocomplete entries from the SQLite schema."""
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name NOT LIKE 'sqlite_%'
+        ORDER BY name
+        """
+    )
+    table_names = [row[0] for row in cursor.fetchall()]
+
+    completions: list[dict[str, Any]] = []
+    seen_values: set[str] = set()
+
+    def add_completion(value: str, meta: str, score: int) -> None:
+        if value in seen_values:
+            return
+        seen_values.add(value)
+        completions.append(
+            {
+                "caption": value,
+                "value": value,
+                "meta": meta,
+                "score": score,
+            }
+        )
+
+    for table_name in table_names:
+        add_completion(table_name, "table", 1000)
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        for column in cursor.fetchall():
+            column_name = column[1]
+            column_type = column[2] or "column"
+            add_completion(column_name, f"column · {column_type}", 900)
+    
+    return completions
 
 
 def render_schema_reference(conn: Any) -> None:
