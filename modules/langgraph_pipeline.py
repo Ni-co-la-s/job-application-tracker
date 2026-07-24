@@ -318,7 +318,7 @@ async def skills_extraction(state: PipelineState) -> PipelineState:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=1000,
+            max_tokens=5000,
             response_format={"type": "json_object"},
         )
 
@@ -389,7 +389,7 @@ async def skills_matching(state: PipelineState) -> PipelineState:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=1000,
+            max_tokens=5000,
             response_format={"type": "json_object"},
         )
 
@@ -480,7 +480,7 @@ async def job_scoring(state: PipelineState) -> PipelineState:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=3000,
+            max_tokens=5000,
         )
 
         content = response.choices[0].message.content
