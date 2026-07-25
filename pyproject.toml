@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "simhash>=2.1.2",
+    "streamlit-code-editor>=0.1.22",
 ]
 
 [build-system]
