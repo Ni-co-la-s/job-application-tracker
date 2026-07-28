@@ -11,7 +11,7 @@ import streamlit as st
 
 import constants
 from modules.database import JobDatabase
-from modules.prompts_loader import reload_prompts
+from modules.prompts_loader import ensure_prompt_defaults, reload_prompts
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
 from tabs.job_browser_tab import render_job_browser
@@ -111,6 +111,12 @@ def startup_check() -> bool:
         st.info("Please restore the missing .example files from the repository.")
         return False
 
+    added_prompt_keys = ensure_prompt_defaults()
+    if added_prompt_keys:
+        st.info(
+            "Added missing prompt defaults to config/prompts.json: "
+            + ", ".join(added_prompt_keys)
+        )
     reload_prompts()
 
     # Create required directories
