@@ -21,7 +21,7 @@ class StageConfig:
     base_url: Optional[str] = None
     model: str = "gpt-4o-mini"
     temperature: float = 0.3
-    max_tokens: int = 2000
+    max_tokens: int = 10000
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary"""
@@ -43,7 +43,7 @@ class StageConfig:
             base_url=data.get("base_url"),
             model=data.get("model", "gpt-4o-mini"),
             temperature=data.get("temperature", 0.3),
-            max_tokens=data.get("max_tokens", 2000),
+            max_tokens=data.get("max_tokens", 10000),
         )
 
 
@@ -86,7 +86,7 @@ class LLMConfigManager:
             base_url=base_url,
             model=model,
             temperature=temperature,
-            max_tokens=2000,
+            max_tokens=10000,
         )
 
     def get_client_for_stage(self, stage_name: str) -> Optional[OpenAI]:
