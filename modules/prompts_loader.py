@@ -51,7 +51,9 @@ def ensure_prompt_defaults() -> list[str]:
         return []
 
     if not isinstance(user_prompts, dict) or not isinstance(default_prompts, dict):
-        logger.error("Could not merge prompt defaults: prompt files must contain JSON objects")
+        logger.error(
+            "Could not merge prompt defaults: prompt files must contain JSON objects"
+        )
         return []
 
     added_keys = [key for key in default_prompts if key not in user_prompts]
