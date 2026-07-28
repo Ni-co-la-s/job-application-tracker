@@ -630,6 +630,7 @@ def _save_pdf(db: JobDatabase, pdf_bytes: bytes, output_name: str) -> None:
         return
     st.success(f"Saved tailored resume to `{output_path}`")
     st.toast("Tailored resume saved.")
+    st.rerun()
 
 
 def _load_redaction_strings(template_name: str) -> list[str]:
