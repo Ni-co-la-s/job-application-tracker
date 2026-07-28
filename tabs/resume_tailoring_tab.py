@@ -75,8 +75,7 @@ def render_resume_tailoring_tab(db: JobDatabase, jobs: list[dict[str, Any]]) -> 
     if not templates:
         st.warning(f"⚠️ No LaTeX templates found in `{constants.RESUME_TEX_DIR}`.")
         st.info(
-            "Create a folder like `Resumes/tex/base/resume.tex` and place any "
-            "supporting .cls/.sty/fonts/images beside it."
+            "You can upload base .tex resumes in User Config → Resumes"
         )
         return
 

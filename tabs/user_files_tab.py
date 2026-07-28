@@ -452,7 +452,7 @@ def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
 def _render_resume_registry(db: Any) -> None:
     """Render managed resume imports and registry actions."""
     st.subheader("Resume Registry")
-    st.caption("PDFs are managed in Resumes/final; LaTeX projects in Resumes/tex.")
+    st.caption("LaTeX files are base used for LLM-based resume tailoring; PDFs are final files used for applications.")
     with st.expander("Add a resume", expanded=True):
         import_type = st.radio(
             "Import type",
