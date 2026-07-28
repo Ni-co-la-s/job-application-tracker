@@ -20,6 +20,7 @@ class JobDatabase:
         """
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
 
     def _create_tables(self) -> None:
@@ -74,20 +75,6 @@ class JobDatabase:
 
         self._ensure_column("jobs", "company_linkedin_id", "INTEGER")
 
-        # Applications table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            application_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resume_version TEXT,
-            resume_file_path TEXT,
-            cover_letter_path TEXT,
-            notes TEXT,
-            FOREIGN KEY (job_id) REFERENCES jobs(id)
-        )
-        """)
-
         # Interview stages table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS interview_stages (
@@ -111,6 +98,39 @@ class JobDatabase:
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (job_id) REFERENCES jobs(id)
         )
+        """)
+
+        self._ensure_column("resume_tailoring_runs", "model_base_url", "TEXT")
+        self._ensure_column("resume_tailoring_runs", "model_name", "TEXT")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS resumes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                path TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('tex', 'pdf')),
+                source_tailoring_run_id INTEGER,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                archived BOOLEAN NOT NULL DEFAULT 0,
+                FOREIGN KEY (source_tailoring_run_id)
+                    REFERENCES resume_tailoring_runs(id) ON DELETE SET NULL
+            )
+        """)
+
+        self.conn.commit()
+        self._migrate_applications_to_resume_registry()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                application_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                resume_id INTEGER,
+                cover_letter_path TEXT,
+                notes TEXT,
+                FOREIGN KEY (job_id) REFERENCES jobs(id),
+                FOREIGN KEY (resume_id) REFERENCES resumes(id)
+            )
         """)
 
         # Status options:
@@ -156,6 +176,21 @@ class JobDatabase:
             ON resume_tailoring_runs(job_id)
         """)
 
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_applications_resume_id
+            ON applications(resume_id)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_resumes_archived_kind_name
+            ON resumes(archived, kind, name)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_resumes_source_tailoring_run_id
+            ON resumes(source_tailoring_run_id)
+        """)
+
         self.conn.commit()
 
     def _ensure_column(self, table: str, column: str, column_definition: str) -> None:
@@ -164,8 +199,133 @@ class JobDatabase:
         cursor.execute(f"PRAGMA table_info({table})")
         existing_columns = {row[1] for row in cursor.fetchall()}
         if column not in existing_columns:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_definition}")
+            cursor.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {column_definition}"
+            )
             self.conn.commit()
+
+    def _table_columns(self, table: str) -> set[str]:
+        """Return column names for an existing SQLite table."""
+        cursor = self.conn.execute(f"PRAGMA table_info({table})")
+        return {row[1] for row in cursor.fetchall()}
+
+    def _migrate_applications_to_resume_registry(self) -> None:
+        """Replace legacy application resume text/path columns with ``resume_id``.
+
+        The old columns are the idempotent migration trigger. The entire table
+        rebuild is transactional, so a failure leaves the legacy schema intact.
+        """
+        columns = self._table_columns("applications")
+        legacy_columns = {"resume_version", "resume_file_path"}
+        if not legacy_columns.issubset(columns):
+            return
+
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("""
+                CREATE TABLE applications_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL,
+                    application_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    resume_id INTEGER,
+                    cover_letter_path TEXT,
+                    notes TEXT,
+                    FOREIGN KEY (job_id) REFERENCES jobs(id),
+                    FOREIGN KEY (resume_id) REFERENCES resumes(id)
+                )
+            """)
+            cursor.execute("""
+                SELECT id, job_id, application_date, resume_version,
+                       resume_file_path, cover_letter_path, notes
+                FROM applications
+                ORDER BY application_date ASC, id ASC
+            """)
+            legacy_rows = cursor.fetchall()
+            resume_ids: dict[str, int] = {}
+
+            for row in legacy_rows:
+                (
+                    application_id,
+                    job_id,
+                    application_date,
+                    resume_version,
+                    resume_file_path,
+                    cover_letter_path,
+                    notes,
+                ) = row
+                resume_name = (resume_version or "").strip()
+                resume_id = None
+                if resume_name:
+                    resume_id = resume_ids.get(resume_name)
+                    if resume_id is None:
+                        existing = cursor.execute(
+                            "SELECT id, path FROM resumes WHERE name = ?",
+                            (resume_name,),
+                        ).fetchone()
+                        if existing:
+                            if (existing[1] or "") != (resume_file_path or ""):
+                                raise sqlite3.IntegrityError(
+                                    f"Legacy resume name {resume_name!r} maps to multiple paths"
+                                )
+                            resume_id = existing[0]
+                        else:
+                            suffix = str(resume_file_path or "").lower()
+                            kind = "tex" if suffix.endswith(".tex") else "pdf"
+                            cursor.execute(
+                                """
+                                INSERT INTO resumes (name, path, kind, created_at)
+                                VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                                """,
+                                (
+                                    resume_name,
+                                    resume_file_path or "",
+                                    kind,
+                                    application_date,
+                                ),
+                            )
+                            resume_id = cursor.lastrowid
+                        resume_ids[resume_name] = resume_id
+
+                cursor.execute(
+                    """
+                    INSERT INTO applications_new
+                        (id, job_id, application_date, resume_id,
+                         cover_letter_path, notes)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        application_id,
+                        job_id,
+                        application_date,
+                        resume_id,
+                        cover_letter_path,
+                        notes,
+                    ),
+                )
+
+            migrated_count = cursor.execute(
+                "SELECT COUNT(*) FROM applications_new"
+            ).fetchone()[0]
+            if migrated_count != len(legacy_rows):
+                raise sqlite3.IntegrityError("Application migration row count mismatch")
+
+            cursor.execute("DROP TABLE applications")
+            cursor.execute("ALTER TABLE applications_new RENAME TO applications")
+            violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise sqlite3.IntegrityError(
+                    f"Foreign key violations after application migration: {violations}"
+                )
+            self.conn.commit()
+            logger.info(
+                "Migrated %d applications and registered %d legacy resumes",
+                len(legacy_rows),
+                len(resume_ids),
+            )
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def insert_job(self, job_data: dict[str, Any]) -> int:
         """Insert or update a job.
@@ -262,8 +422,7 @@ class JobDatabase:
     def mark_applied(
         self,
         job_id: int,
-        resume_version: str,
-        resume_path: str,
+        resume_id: int,
         cover_letter_path: str | None = None,
         notes: str | None = None,
         application_date: str | None = None,
@@ -272,8 +431,7 @@ class JobDatabase:
 
         Args:
             job_id: ID of the job to mark as applied.
-            resume_version: Version identifier of the resume used.
-            resume_path: Path to the resume file.
+            resume_id: Registry ID of the resume used.
             cover_letter_path: Optional path to cover letter file.
             notes: Optional application notes.
             application_date: Optional application date (YYYY-MM-DD format).
@@ -284,14 +442,13 @@ class JobDatabase:
         if application_date:
             cursor.execute(
                 """
-                INSERT INTO applications (job_id, resume_version, resume_file_path, 
-                                        cover_letter_path, notes, application_date)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO applications (job_id, resume_id,
+                                          cover_letter_path, notes, application_date)
+                VALUES (?, ?, ?, ?, ?)
             """,
                 (
                     job_id,
-                    resume_version,
-                    resume_path,
+                    resume_id,
                     cover_letter_path,
                     notes,
                     application_date,
@@ -300,11 +457,11 @@ class JobDatabase:
         else:
             cursor.execute(
                 """
-                INSERT INTO applications (job_id, resume_version, resume_file_path, 
-                                        cover_letter_path, notes)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO applications (job_id, resume_id,
+                                          cover_letter_path, notes)
+                VALUES (?, ?, ?, ?)
             """,
-                (job_id, resume_version, resume_path, cover_letter_path, notes),
+                (job_id, resume_id, cover_letter_path, notes),
             )
         self.conn.commit()
 
@@ -366,11 +523,15 @@ class JobDatabase:
         query = """
             SELECT j.*, 
                 a.application_date,
-                a.resume_version,
-                a.resume_file_path,
+                a.resume_id,
+                r.name AS resume_name,
+                r.path AS resume_path,
+                r.name AS resume_version,
+                r.path AS resume_file_path,
                 GROUP_CONCAT(i.stage || ' (' || i.stage_date || ')') as stages
             FROM jobs j
             LEFT JOIN applications a ON j.id = a.job_id
+            LEFT JOIN resumes r ON a.resume_id = r.id
             LEFT JOIN interview_stages i ON j.id = i.job_id
             WHERE 1=1
         """
@@ -574,7 +735,16 @@ class JobDatabase:
             Application dictionary or None if not found.
         """
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM applications WHERE job_id = ?", (job_id,))
+        cursor.execute(
+            """
+            SELECT a.*, r.name AS resume_name, r.path AS resume_path,
+                   r.kind AS resume_kind, r.archived AS resume_archived
+            FROM applications a
+            LEFT JOIN resumes r ON r.id = a.resume_id
+            WHERE a.job_id = ?
+            """,
+            (job_id,),
+        )
         row = cursor.fetchone()
 
         if row:
@@ -588,6 +758,10 @@ class JobDatabase:
         base_template: str,
         output_path: str,
         edits_json: str,
+        model_base_url: str | None = None,
+        model_name: str | None = None,
+        *,
+        commit: bool = True,
     ) -> int:
         """Insert one saved resume tailoring run record.
 
@@ -604,12 +778,21 @@ class JobDatabase:
         cursor.execute(
             """
             INSERT INTO resume_tailoring_runs
-                (job_id, base_template, output_path, edits_json)
-            VALUES (?, ?, ?, ?)
+                (job_id, base_template, output_path, edits_json,
+                 model_base_url, model_name)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (job_id, base_template, output_path, edits_json),
+            (
+                job_id,
+                base_template,
+                output_path,
+                edits_json,
+                model_base_url,
+                model_name,
+            ),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return cursor.lastrowid
 
     def get_resume_tailoring_runs_for_job(self, job_id: int) -> list[dict[str, Any]]:
@@ -635,6 +818,141 @@ class JobDatabase:
             columns = [desc[0] for desc in cursor.description]
             return dict(zip(columns, row))
         return None
+
+    def create_resume(
+        self,
+        name: str,
+        path: str,
+        kind: str,
+        source_tailoring_run_id: int | None = None,
+        *,
+        commit: bool = True,
+    ) -> int:
+        """Register one managed resume and return its ID."""
+        if kind not in {"tex", "pdf"}:
+            raise ValueError("Resume kind must be 'tex' or 'pdf'")
+        cursor = self.conn.execute(
+            """
+            INSERT INTO resumes (name, path, kind, source_tailoring_run_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name.strip(), path, kind, source_tailoring_run_id),
+        )
+        if commit:
+            self.conn.commit()
+        return cursor.lastrowid
+
+    def get_resume(self, resume_id: int) -> dict[str, Any] | None:
+        """Return one resume with tailoring/job provenance."""
+        cursor = self.conn.execute(
+            """
+            SELECT r.*, tr.job_id AS tailored_job_id,
+                   tr.model_name, tr.model_base_url,
+                   j.title AS tailored_job_title, j.company AS tailored_job_company
+            FROM resumes r
+            LEFT JOIN resume_tailoring_runs tr
+                ON tr.id = r.source_tailoring_run_id
+            LEFT JOIN jobs j ON j.id = tr.job_id
+            WHERE r.id = ?
+            """,
+            (resume_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(zip((item[0] for item in cursor.description), row))
+
+    def list_resumes(
+        self,
+        archive_status: str = "active",
+        kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List registry resumes alphabetically with optional filters."""
+        query = """
+            SELECT r.*, tr.job_id AS tailored_job_id,
+                   tr.model_name, tr.model_base_url,
+                   j.title AS tailored_job_title, j.company AS tailored_job_company,
+                   (SELECT COUNT(*) FROM applications a WHERE a.resume_id = r.id)
+                       AS application_count
+            FROM resumes r
+            LEFT JOIN resume_tailoring_runs tr
+                ON tr.id = r.source_tailoring_run_id
+            LEFT JOIN jobs j ON j.id = tr.job_id
+            WHERE 1=1
+        """
+        params: list[Any] = []
+        if archive_status == "active":
+            query += " AND r.archived = 0"
+        elif archive_status == "archived":
+            query += " AND r.archived = 1"
+        if kind:
+            query += " AND r.kind = ?"
+            params.append(kind)
+        query += " ORDER BY lower(r.name), r.id"
+        cursor = self.conn.execute(query, params)
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_application_resume_options(self, job_id: int) -> list[dict[str, Any]]:
+        """Return active PDFs, prioritizing resumes tailored for ``job_id``."""
+        cursor = self.conn.execute(
+            """
+            SELECT r.*, tr.job_id AS tailored_job_id,
+                   CASE WHEN tr.job_id = ? THEN 1 ELSE 0 END AS matches_job
+            FROM resumes r
+            LEFT JOIN resume_tailoring_runs tr
+                ON tr.id = r.source_tailoring_run_id
+            WHERE r.archived = 0 AND r.kind = 'pdf'
+            ORDER BY CASE WHEN tr.job_id = ? THEN 0 ELSE 1 END,
+                     lower(r.name), r.id
+            """,
+            (job_id, job_id),
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def set_resume_archived(self, resume_id: int, archived: bool) -> None:
+        """Archive or unarchive a resume."""
+        self.conn.execute(
+            "UPDATE resumes SET archived = ? WHERE id = ?",
+            (int(archived), resume_id),
+        )
+        self.conn.commit()
+
+    def count_resume_applications(self, resume_id: int) -> int:
+        """Return how many applications reference a resume."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM applications WHERE resume_id = ?", (resume_id,)
+        ).fetchone()[0]
+
+    def delete_resume_record(self, resume_id: int, *, commit: bool = True) -> None:
+        """Delete an unused resume record, refusing referenced resumes."""
+        usage_count = self.count_resume_applications(resume_id)
+        if usage_count:
+            raise ValueError(
+                f"Resume is used by {usage_count} application(s) and cannot be deleted"
+            )
+        self.conn.execute("DELETE FROM resumes WHERE id = ?", (resume_id,))
+        if commit:
+            self.conn.commit()
+
+    def get_resume_counts(self) -> dict[str, int]:
+        """Return compact registry counts for the dashboard sidebar."""
+        row = self.conn.execute(
+            """
+            SELECT COUNT(*),
+                   SUM(CASE WHEN archived = 0 AND kind = 'pdf' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN archived = 0 AND kind = 'tex' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END)
+            FROM resumes
+            """
+        ).fetchone()
+        return {
+            "total": row[0] or 0,
+            "active_pdf": row[1] or 0,
+            "active_tex": row[2] or 0,
+            "archived": row[3] or 0,
+        }
 
     def get_interview_stages_by_job_id(self, job_id: int) -> list[dict[str, Any]]:
         """Get all interview stages for a job.
@@ -727,8 +1045,7 @@ class JobDatabase:
             # Update existing application
             editable_fields = {
                 "application_date",
-                "resume_version",
-                "resume_file_path",
+                "resume_id",
                 "cover_letter_path",
                 "notes",
             }

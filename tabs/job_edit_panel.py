@@ -233,15 +233,29 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
                 "Application Date", value=app_date_value, key="edit_app_date"
             )
 
-            resume_version = st.text_input(
-                "Resume Version",
-                value=application.get("resume_version") or "",
-                key="edit_resume_version",
-            )
-            resume_file_path = st.text_input(
-                "Resume File Path",
-                value=application.get("resume_file_path") or "",
-                key="edit_resume_file_path",
+            resume_options = db.get_application_resume_options(job_id)
+            current_resume_id = application.get("resume_id")
+            if current_resume_id and not any(
+                r["id"] == current_resume_id for r in resume_options
+            ):
+                current = db.get_resume(current_resume_id)
+                if current:
+                    resume_options.insert(0, {**current, "matches_job": 0})
+            resume_ids = [resume["id"] for resume in resume_options]
+            resume_id = (
+                st.selectbox(
+                    "Resume",
+                    options=resume_ids,
+                    index=resume_ids.index(current_resume_id)
+                    if current_resume_id in resume_ids
+                    else 0,
+                    format_func=lambda value: next(
+                        r["name"] for r in resume_options if r["id"] == value
+                    ),
+                    key="edit_resume_id",
+                )
+                if resume_ids
+                else None
             )
             cover_letter_path = st.text_input(
                 "Cover Letter Path",
@@ -406,8 +420,7 @@ def render_edit_panel(db: JobDatabase, job_id: int, jobs: list[dict[str, Any]]) 
                         "application_date": application_date.strftime("%Y-%m-%d")
                         if application_date
                         else None,
-                        "resume_version": resume_version,
-                        "resume_file_path": resume_file_path,
+                        "resume_id": resume_id,
                         "cover_letter_path": cover_letter_path,
                         "notes": notes,
                     }

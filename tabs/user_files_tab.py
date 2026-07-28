@@ -1,7 +1,5 @@
 """User configuration tab for editable profile files, LLM settings, and prompt tests."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any
@@ -21,6 +19,13 @@ from modules.resume_editing import (
     STATUS_APPLIED_NORMALIZED_WHITESPACE,
 )
 from modules.resume_templates import list_latex_templates
+from modules.resume_registry import (
+    ResumeRegistryError,
+    delete_managed_resume,
+    import_pdf,
+    import_standalone_tex,
+    import_tex_zip,
+)
 
 
 ENV_FILE = Path(".env")
@@ -444,12 +449,90 @@ def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
         _render_resume_tailoring_test_result(result)
 
 
+def _render_resume_registry(db: Any) -> None:
+    """Render managed resume imports and registry actions."""
+    st.subheader("Resume Registry")
+    st.caption("PDFs are managed in Resumes/final; LaTeX projects in Resumes/tex.")
+    with st.expander("Add a resume", expanded=True):
+        import_type = st.radio(
+            "Import type",
+            ["PDF", "Standalone resume.tex", "LaTeX project ZIP"],
+            horizontal=True,
+        )
+        extensions = {
+            "PDF": ["pdf"],
+            "Standalone resume.tex": ["tex"],
+            "LaTeX project ZIP": ["zip"],
+        }
+        upload = st.file_uploader("Choose file", type=extensions[import_type])
+        name = st.text_input(
+            "Registry name", value=Path(upload.name).stem if upload else ""
+        )
+        if st.button("Import resume", type="primary", disabled=upload is None):
+            try:
+                if import_type == "PDF":
+                    import_pdf(db, name, upload.getvalue())
+                elif import_type == "Standalone resume.tex":
+                    import_standalone_tex(db, name, upload.getvalue())
+                else:
+                    import_tex_zip(db, name, upload.getvalue())
+                st.toast("Resume imported and registered.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Import failed: {exc}")
+
+    archive_filter = st.radio(
+        "Archive filter", ["Active", "Archived", "All"], horizontal=True
+    )
+    kind_filter = st.radio("Resume type", ["PDF", "TeX", "All"], horizontal=True)
+    selected_kind = None if kind_filter == "All" else kind_filter.lower()
+    resumes = db.list_resumes(archive_filter.lower(), kind=selected_kind)
+    if not resumes:
+        st.info("No resumes match this filter.")
+        return
+    selected_id = st.selectbox(
+        "Select resume",
+        [resume["id"] for resume in resumes],
+        format_func=lambda value: next(r["name"] for r in resumes if r["id"] == value),
+    )
+    resume = next(r for r in resumes if r["id"] == selected_id)
+    st.json(
+        {
+            "name": resume["name"],
+            "kind": resume["kind"],
+            "path": resume["path"],
+            "created_at": resume["created_at"],
+            "archived": bool(resume["archived"]),
+            "applications": resume["application_count"],
+        }
+    )
+    archive_col, delete_col = st.columns(2)
+    with archive_col:
+        action = "Unarchive" if resume["archived"] else "Archive"
+        if st.button(action, width="stretch"):
+            db.set_resume_archived(selected_id, not bool(resume["archived"]))
+            st.rerun()
+    with delete_col:
+        if st.button("Delete", type="primary", width="stretch"):
+            try:
+                delete_managed_resume(db, selected_id)
+                st.rerun()
+            except ResumeRegistryError as exc:
+                st.error(str(exc))
+
+
 def render_user_files_tab(db: Any, jobs: list[dict[str, Any]]) -> None:
     """Render the user configuration tab."""
     st.title("⚙️ User Config")
 
-    config_tab, prompts_tab, env_tab, testing_tab = st.tabs(
-        ["Profile Files", "Pipeline Prompts", "LLM Settings", "Prompt Testing"]
+    config_tab, prompts_tab, env_tab, testing_tab, resumes_tab = st.tabs(
+        [
+            "Profile Files",
+            "Pipeline Prompts",
+            "LLM Settings",
+            "Prompt Testing",
+            "Resumes",
+        ]
     )
 
     with config_tab:
@@ -485,3 +568,6 @@ def render_user_files_tab(db: Any, jobs: list[dict[str, Any]]) -> None:
 
     with testing_tab:
         _render_prompt_testing(jobs)
+
+    with resumes_tab:
+        _render_resume_registry(db)

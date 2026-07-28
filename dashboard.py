@@ -14,7 +14,7 @@ from modules.database import JobDatabase
 from modules.prompts_loader import reload_prompts
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
-from tabs.job_browser_tab import get_resume_version_pdf, render_job_browser
+from tabs.job_browser_tab import render_job_browser
 from tabs.resume_tailoring_tab import render_resume_tailoring_tab
 from tabs.scraping_tab import render_scraping_tab
 from tabs.user_files_tab import render_user_files_tab
@@ -105,7 +105,9 @@ def startup_check() -> bool:
     if missing_files:
         st.error("❌ Missing required configuration templates:")
         for filepath, description, example_path in missing_files:
-            st.error(f"   - {filepath} ({description}); expected template: {example_path}")
+            st.error(
+                f"   - {filepath} ({description}); expected template: {example_path}"
+            )
         st.info("Please restore the missing .example files from the repository.")
         return False
 
@@ -390,22 +392,13 @@ def main() -> None:
                     }.get(site.lower() if site else "", "🌐")
                     st.write(f"{site_emoji} {site or 'Unknown'}: {count}")
 
-        # Resume folder info
+        # Resume registry info
         st.sidebar.markdown("---")
-        st.sidebar.subheader("📁 Resume Folder")
-        resume_versions = get_resume_version_pdf()
-        if resume_versions:
-            st.sidebar.success(f"✓ {len(resume_versions)} PDF resume(s) found")
-            with st.sidebar.expander("View Resumes"):
-                for resume in resume_versions:
-                    st.write(f"• {resume}")
-        else:
-            st.sidebar.warning(
-                f"⚠️ No PDF resumes in '{constants.RESUME_FINAL_DIR}' folder"
-            )
-            st.sidebar.caption(
-                f"Add PDF resume files to '{constants.RESUME_FINAL_DIR}' folder to track versions"
-            )
+        st.sidebar.subheader("📁 Resume Registry")
+        resume_counts = db.get_resume_counts()
+        st.sidebar.write(f"Active PDFs: {resume_counts['active_pdf']}")
+        st.sidebar.write(f"Active TeX projects: {resume_counts['active_tex']}")
+        st.sidebar.write(f"Archived: {resume_counts['archived']}")
 
     except Exception as e:
         st.sidebar.error(f"⚠️ Sidebar error: {e}")

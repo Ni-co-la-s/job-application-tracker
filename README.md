@@ -29,12 +29,18 @@ A dedicated interface to interact with job descriptions for drafting cover lette
 
 ### AI Resume Tailoring
 
-Generate job-specific LaTeX resume edits from a selected job posting, review each search/replacement edit individually, compile an in-app PDF preview, and save the approved PDF to `Resumes/final/`.
+Generate job-specific LaTeX resume edits from a selected job posting, review each search/replacement edit individually, compile an in-app PDF preview, and save the approved PDF in the database.
 
 The tailoring workflow uses:
 - `config/resume.txt` as the full information bank of your experience, projects, and skills.
 - `Resumes/tex/<template-name>/resume.tex` as the editable LaTeX target.
 - The selected job's stored database description as the target job context.
+
+### Resume and Application Tracking
+
+Import PDF resumes and LaTeX resume projects from **User Config → Resumes**. Resumes are stored in a database-backed registry, can be archived when no longer current, and can be selected when marking a job as applied.
+
+When applying to a job, the resume picker retrieves them from the database. If you generated a tailored resume for that job, it is shown first.
 
 ### Data Analytics
 
@@ -102,8 +108,15 @@ for f in config/*.example; do cp "$f" "${f%.example}"; done
 
 4. **Add Resume PDF and/or LaTeX Templates**
 
-Place your resumes in PDF format within `Resumes/final/`. You can have several versions to track how they are performing. The dashboard will automatically detect these for application tracking.
-Those will not be passed to LLMs.
+Start the dashboard and go to **User Config → Resumes** to import your resumes.
+
+You can import:
+
+- a PDF resume, which is copied to `Resumes/final/` and used when marking jobs as applied;
+- a standalone `resume.tex` file (entrypoint);
+- a zipped LaTeX project containing one `resume.tex` (entrypoint).
+
+PDF resumes are used for application tracking and are not passed to LLMs. Archived resumes stay in the registry but are hidden from the application resume picker.
 
 For AI Resume Tailoring, place LaTeX sources under:
 
@@ -166,6 +179,8 @@ RESUME_TAILORING_API_KEY=sk-...
 RESUME_TAILORING_BASE_URL=https://api.openai.com/v1
 ```
 
+Saved tailored resumes are registered automatically and linked to the tailoring run that generated them, including the model name and base URL used.
+
 The tab compiles PDFs using a system LaTeX engine:
 
 1. Prefer `tectonic` if available.
@@ -173,6 +188,18 @@ The tab compiles PDFs using a system LaTeX engine:
 3. For fontspec templates, select the XeLaTeX or LuaLaTeX option in the UI, which uses `latexmk -pdfxe` or `latexmk -pdflua`.
 
 Some pdflatex-only templates may need tweaks when compiled with Tectonic or XeLaTeX/LuaLaTeX.
+
+### Managing Resumes
+
+Use **User Config → Resumes** to:
+
+- import PDF resumes and LaTeX resume projects;
+- search/select resumes from the registry;
+- filter by active/archived status and by type (`pdf`, `tex`, or all);
+- archive or unarchive resumes;
+- delete resumes that have not been used in an application.
+
+Deletion is blocked for resumes already referenced by applications, so application history remains consistent.
 
 ### Standalone Scraper
 

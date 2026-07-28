@@ -13,6 +13,7 @@ from streamlit_pdf_viewer import pdf_viewer
 import constants
 from modules.database import JobDatabase
 from modules.latex_builder import LatexBuildError, build_pdf
+from modules.llm_config import get_config_manager
 from modules.resume_editing import (
     STATUS_APPLIED_EXACT,
     STATUS_APPLIED_NORMALIZED_WHITESPACE,
@@ -149,6 +150,8 @@ def _init_state() -> None:
         "tailoring_raw_error": None,
         "tailoring_saved_edits_json": "[]",
         "tailoring_applied_edit_line_ranges": [],
+        "tailoring_model_name": None,
+        "tailoring_model_base_url": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -205,6 +208,13 @@ def _generate_edits(
         st.session_state.tailoring_raw_error = None
         st.session_state.tailoring_saved_edits_json = "[]"
         st.session_state.tailoring_applied_edit_line_ranges = []
+        model_config = get_config_manager().get_config_for_stage("resume_tailoring")
+        st.session_state.tailoring_model_name = (
+            model_config.model if model_config else None
+        )
+        st.session_state.tailoring_model_base_url = (
+            model_config.base_url if model_config else None
+        )
         st.session_state[_tailored_text_key(generation_id)] = preview["source_tex"]
         st.toast(f"Generated {len(edits)} edit(s).")
         st.rerun()
@@ -541,7 +551,9 @@ def _ace_markers_for_line_ranges(
     markers: list[dict[str, Any]] = []
     for line_range in line_ranges:
         start_line = max(1, int(line_range.get("start_line", 1)))
-        end_line = min(line_count, max(start_line, int(line_range.get("end_line", start_line))))
+        end_line = min(
+            line_count, max(start_line, int(line_range.get("end_line", start_line)))
+        )
         markers.append(
             {
                 "startRow": start_line - 1,
@@ -556,7 +568,7 @@ def _ace_markers_for_line_ranges(
 
 
 def _ace_annotations_for_line_ranges(
-    line_ranges: list[dict[str, int]]
+    line_ranges: list[dict[str, int]],
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -585,14 +597,40 @@ def _save_pdf(db: JobDatabase, pdf_bytes: bytes, output_name: str) -> None:
     filename = _sanitize_pdf_filename(output_name)
     output_path = Path(constants.RESUME_FINAL_DIR) / filename
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        st.error(f"A managed file already exists at `{output_path}`.")
+        return
+    resume_name = output_path.stem
+    if db.conn.execute(
+        "SELECT 1 FROM resumes WHERE name = ?", (resume_name,)
+    ).fetchone():
+        st.error(f"A registered resume named `{resume_name}` already exists.")
+        return
     output_path.write_bytes(pdf_bytes)
 
-    db.save_resume_tailoring_run(
-        job_id=st.session_state.tailoring_job_id,
-        base_template=st.session_state.tailoring_template,
-        output_path=str(output_path),
-        edits_json=st.session_state.tailoring_saved_edits_json,
-    )
+    try:
+        run_id = db.save_resume_tailoring_run(
+            job_id=st.session_state.tailoring_job_id,
+            base_template=st.session_state.tailoring_template,
+            output_path=str(output_path),
+            edits_json=st.session_state.tailoring_saved_edits_json,
+            model_base_url=st.session_state.tailoring_model_base_url,
+            model_name=st.session_state.tailoring_model_name,
+            commit=False,
+        )
+        db.create_resume(
+            resume_name,
+            str(output_path),
+            "pdf",
+            source_tailoring_run_id=run_id,
+            commit=False,
+        )
+        db.conn.commit()
+    except Exception as exc:
+        db.conn.rollback()
+        output_path.unlink(missing_ok=True)
+        st.error(f"Could not register tailored resume: {exc}")
+        return
     st.success(f"Saved tailored resume to `{output_path}`")
     st.toast("Tailored resume saved.")
 
