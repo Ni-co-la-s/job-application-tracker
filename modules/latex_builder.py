@@ -6,6 +6,9 @@ import tempfile
 from pathlib import Path
 
 
+LATEX_BUILD_TMP_DIR = Path(".latex-build-tmp")
+
+
 class LatexBuildError(Exception):
     """Raised when LaTeX compilation fails."""
 
@@ -27,7 +30,10 @@ def build_pdf(
     assets such as .cls/.sty files, fonts, images, and subfolders while keeping
     generated artifacts out of the source template directory.
     """
-    with tempfile.TemporaryDirectory() as td:
+    LATEX_BUILD_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="latex-build-", dir=LATEX_BUILD_TMP_DIR
+    ) as td:
         work = Path(td)
         if template_dir and template_dir.is_dir():
             shutil.copytree(template_dir, work, dirs_exist_ok=True)

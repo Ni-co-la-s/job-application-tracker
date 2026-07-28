@@ -74,9 +74,7 @@ def render_resume_tailoring_tab(db: JobDatabase, jobs: list[dict[str, Any]]) -> 
     templates = list_latex_templates()
     if not templates:
         st.warning(f"⚠️ No LaTeX templates found in `{constants.RESUME_TEX_DIR}`.")
-        st.info(
-            "You can upload base .tex resumes in User Config → Resumes"
-        )
+        st.info("You can upload base .tex resumes in User Config → Resumes")
         return
 
     if not jobs:

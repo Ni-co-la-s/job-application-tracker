@@ -8,6 +8,7 @@ import streamlit as st
 
 import constants
 from modules.llm_config import get_config_manager, reload_config_manager
+from modules.latex_builder import LatexBuildError
 from modules.prompt_testing import (
     run_extraction_and_matching_preview,
     run_job_scoring_preview,
@@ -452,7 +453,9 @@ def _render_prompt_testing(jobs: list[dict[str, Any]]) -> None:
 def _render_resume_registry(db: Any) -> None:
     """Render managed resume imports and registry actions."""
     st.subheader("Resume Registry")
-    st.caption("LaTeX files are base used for LLM-based resume tailoring; PDFs are final files used for applications.")
+    st.caption(
+        "LaTeX files are base used for LLM-based resume tailoring; PDFs are final files used for applications."
+    )
     with st.expander("Add a resume", expanded=True):
         import_type = st.radio(
             "Import type",
@@ -478,6 +481,11 @@ def _render_resume_registry(db: Any) -> None:
                     import_tex_zip(db, name, upload.getvalue())
                 st.toast("Resume imported and registered.")
                 st.rerun()
+            except LatexBuildError as exc:
+                st.error(f"Import failed: {exc}")
+                if exc.full_log:
+                    with st.expander("Full LaTeX build log", expanded=True):
+                        st.code(exc.full_log, language="text")
             except Exception as exc:
                 st.error(f"Import failed: {exc}")
 
