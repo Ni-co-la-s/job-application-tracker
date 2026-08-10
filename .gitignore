@@ -21,6 +21,7 @@ uv.lock
 # Output files
 *.html
 *.csv
+.latex-build-tmp/
 
 # Environment variables
 .env
@@ -47,6 +48,5 @@ CoverLetters/
 .DS_Store
 Thumbs.db
 
-migrations.py
 test.py
 compare.py

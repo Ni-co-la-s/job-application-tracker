@@ -11,9 +11,16 @@ import streamlit as st
 
 import constants
 from modules.database import JobDatabase
+from modules.migrations import (
+    MigrationRequiredError,
+    UnsupportedDatabaseVersionError,
+    create_migration_backup,
+)
+from modules.prompts_loader import ensure_prompt_defaults, reload_prompts
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
-from tabs.job_browser_tab import get_resume_version_pdf, render_job_browser
+from tabs.job_browser_tab import render_job_browser
+from tabs.resume_tailoring_tab import render_resume_tailoring_tab
 from tabs.scraping_tab import render_scraping_tab
 from tabs.user_files_tab import render_user_files_tab
 
@@ -42,6 +49,69 @@ def init_session_state() -> None:
         st.session_state.title_text_filter = ""
     if "description_text_filter" not in st.session_state:
         st.session_state.description_text_filter = ""
+
+
+def initialize_database() -> JobDatabase:
+    """Initialize the database or block until its migration is approved."""
+    try:
+        database = JobDatabase(constants.JOBS_DB)
+    except UnsupportedDatabaseVersionError as error:
+        st.title("Database version not supported")
+        st.error(str(error))
+        st.info("Update the application before opening this database.")
+        st.stop()
+    except MigrationRequiredError as migration_required:
+        st.title("Database upgrade required")
+        st.warning(
+            "The dashboard needs to update your existing database before it can "
+            "continue. A verified, timestamped backup will be created first."
+        )
+        st.write(f"**Database:** `{Path(constants.JOBS_DB).resolve()}`")
+        st.write(
+            f"**Backup folder:** "
+            f"`{Path(constants.JOBS_DB).resolve().parent / 'backups'}`"
+        )
+        st.write(
+            f"**Schema version:** {migration_required.current_version} → "
+            f"{migration_required.migrations[-1].version}"
+        )
+        st.write("**Pending migrations:**")
+        for migration in migration_required.migrations:
+            st.write(f"- {migration.version}: {migration.name}")
+
+        accepted = st.checkbox(
+            "I understand that the database will be backed up and then updated."
+        )
+        if st.button(
+            "Create backup and migrate",
+            type="primary",
+            disabled=not accepted,
+        ):
+            try:
+                with st.spinner("Creating a verified backup..."):
+                    backup_path = create_migration_backup(constants.JOBS_DB)
+                with st.spinner("Applying database migrations..."):
+                    migrated_database = JobDatabase(
+                        constants.JOBS_DB,
+                        allow_migrations=True,
+                    )
+                    migrated_database.conn.close()
+            except Exception as error:
+                logger.exception("Database migration failed")
+                st.error(
+                    "The database was not upgraded. The migration was rolled back. "
+                    f"Details: {error}"
+                )
+                st.stop()
+
+            st.session_state["migration_backup_path"] = str(backup_path)
+            st.rerun()
+        st.stop()
+
+    backup_path = st.session_state.pop("migration_backup_path", None)
+    if backup_path:
+        st.success(f"Database upgraded successfully. Backup: `{backup_path}`")
+    return database
 
 
 def startup_check() -> bool:
@@ -103,12 +173,23 @@ def startup_check() -> bool:
     if missing_files:
         st.error("❌ Missing required configuration templates:")
         for filepath, description, example_path in missing_files:
-            st.error(f"   - {filepath} ({description}); expected template: {example_path}")
+            st.error(
+                f"   - {filepath} ({description}); expected template: {example_path}"
+            )
         st.info("Please restore the missing .example files from the repository.")
         return False
 
+    added_prompt_keys = ensure_prompt_defaults()
+    if added_prompt_keys:
+        st.info(
+            "Added missing prompt defaults to config/prompts.json: "
+            + ", ".join(added_prompt_keys)
+        )
+    reload_prompts()
+
     # Create required directories
     Path(constants.RESUME_FINAL_DIR).mkdir(parents=True, exist_ok=True)
+    Path(constants.RESUME_TEX_DIR).mkdir(parents=True, exist_ok=True)
 
     return True
 
@@ -123,7 +204,7 @@ def main() -> None:
         st.stop()
 
     # Initialize database
-    db = JobDatabase(constants.JOBS_DB)
+    db = initialize_database()
 
     # Sidebar filters
     st.sidebar.title("🔍 Filters")
@@ -248,13 +329,14 @@ def main() -> None:
         jobs, total_count = [], 0
 
     # Main content - Tabbed interface
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         [
             "📋 Job Browser",
             "🤖 AI Tools",
-            "⚙️ User Config",
+            "🧵 Resume Tailoring",
             "🔍 Scraping",
             "📊 Analytics",
+            "⚙️ User Config",
         ]
     )
 
@@ -279,9 +361,10 @@ def main() -> None:
 
     with tab3:
         try:
-            render_user_files_tab(db, jobs)
+            render_resume_tailoring_tab(db, jobs)
         except Exception as e:
-            st.error(f"❌ Error in User Config tab: {e}")
+            logger.error(f"Error in Resume Tailoring tab: {e}")
+            st.error(f"❌ Error in Resume Tailoring tab: {e}")
             import traceback
 
             st.code(traceback.format_exc())
@@ -297,6 +380,15 @@ def main() -> None:
 
     with tab5:
         render_analytics_tab(db)
+
+    with tab6:
+        try:
+            render_user_files_tab(db, jobs)
+        except Exception as e:
+            st.error(f"❌ Error in User Config tab: {e}")
+            import traceback
+
+            st.code(traceback.format_exc())
 
     try:
         # Export section in sidebar
@@ -374,22 +466,13 @@ def main() -> None:
                     }.get(site.lower() if site else "", "🌐")
                     st.write(f"{site_emoji} {site or 'Unknown'}: {count}")
 
-        # Resume folder info
+        # Resume registry info
         st.sidebar.markdown("---")
-        st.sidebar.subheader("📁 Resume Folder")
-        resume_versions = get_resume_version_pdf()
-        if resume_versions:
-            st.sidebar.success(f"✓ {len(resume_versions)} PDF resume(s) found")
-            with st.sidebar.expander("View Resumes"):
-                for resume in resume_versions:
-                    st.write(f"• {resume}")
-        else:
-            st.sidebar.warning(
-                f"⚠️ No PDF resumes in '{constants.RESUME_FINAL_DIR}' folder"
-            )
-            st.sidebar.caption(
-                f"Add PDF resume files to '{constants.RESUME_FINAL_DIR}' folder to track versions"
-            )
+        st.sidebar.subheader("📁 Resume Registry")
+        resume_counts = db.get_resume_counts()
+        st.sidebar.write(f"Active PDFs: {resume_counts['active_pdf']}")
+        st.sidebar.write(f"Active TeX projects: {resume_counts['active_tex']}")
+        st.sidebar.write(f"Archived: {resume_counts['archived']}")
 
     except Exception as e:
         st.sidebar.error(f"⚠️ Sidebar error: {e}")

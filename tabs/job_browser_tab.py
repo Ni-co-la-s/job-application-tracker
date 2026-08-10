@@ -7,7 +7,6 @@ from typing import Any
 
 import streamlit as st
 
-import constants
 from modules.database import JobDatabase
 from modules.interview_stages_loader import (
     get_stage_options,
@@ -17,25 +16,6 @@ from tabs.job_edit_panel import render_edit_panel
 from tabs.add_job_panel import render_add_job_panel
 
 logger = logging.getLogger(__name__)
-
-
-def get_resume_version_pdf() -> list[str]:
-    """Get list of resume PDF files from RESUME_FINAL_DIR folder.
-
-    Returns:
-        List of PDF filenames sorted alphabetically.
-    """
-    resume_folder = Path(constants.RESUME_FINAL_DIR)
-    if not resume_folder.exists():
-        resume_folder.mkdir(parents=True)
-        return []
-
-    resume_files = list(resume_folder.glob("*.*"))
-    # Only show PDF files
-    valid_extensions = {".pdf"}
-    resume_files = [f for f in resume_files if f.suffix.lower() in valid_extensions]
-
-    return sorted([f.name for f in resume_files])
 
 
 def render_job_browser(
@@ -221,6 +201,11 @@ def render_job_browser(
                             job_ids,
                         )
                         deleted_stages = cursor.rowcount
+
+                        cursor.execute(
+                            f"DELETE FROM resume_tailoring_runs WHERE job_id IN ({placeholders})",
+                            job_ids,
+                        )
 
                         cursor.execute(
                             f"DELETE FROM jobs WHERE id IN ({placeholders})", job_ids
@@ -415,33 +400,39 @@ def render_job_browser(
                                 st.write("**Mark as Applied**")
 
                                 # Get available resumes from folder
-                                available_resumes = get_resume_version_pdf()
+                                available_resumes = db.get_application_resume_options(
+                                    job["id"]
+                                )
 
                                 if available_resumes:
-                                    selected_resume = st.selectbox(
+                                    selected_resume_id = st.selectbox(
                                         "Select Resume",
-                                        options=available_resumes,
+                                        options=[
+                                            resume["id"] for resume in available_resumes
+                                        ],
+                                        format_func=lambda resume_id: next(
+                                            ("🎯 " if r["matches_job"] else "")
+                                            + r["name"]
+                                            for r in available_resumes
+                                            if r["id"] == resume_id
+                                        ),
                                         key=f"resume_select_{job['id']}",
                                     )
-
-                                    # Show full path - use RESUME_FINAL_DIR
-                                    resume_full_path = str(
-                                        Path(constants.RESUME_FINAL_DIR)
-                                        / selected_resume
+                                    selected_resume = next(
+                                        r
+                                        for r in available_resumes
+                                        if r["id"] == selected_resume_id
                                     )
-                                    st.caption(f"📁 Full path: `{resume_full_path}`")
-
-                                    # Extract version from filename (without extension)
-                                    resume_version = Path(selected_resume).stem
+                                    st.caption(
+                                        f"📁 Full path: `{selected_resume['path']}`"
+                                    )
 
                                 else:
                                     st.warning("⚠️ No resumes found in 'Resumes' folder")
                                     st.info(
                                         "Please add resume files to the 'Resumes' folder"
                                     )
-                                    selected_resume = None
-                                    resume_version = "unknown"
-                                    resume_full_path = ""
+                                    selected_resume_id = None
 
                                 # Optional: Cover letter
                                 cover_letter_path = st.text_input(
@@ -465,13 +456,12 @@ def render_job_browser(
                                 if st.form_submit_button(
                                     "Mark Applied", disabled=submit_disabled
                                 ):
-                                    if selected_resume:
+                                    if selected_resume_id:
                                         # Convert date to string format for database
                                         date_str = application_date.strftime("%Y-%m-%d")
                                         db.mark_applied(
                                             job["id"],
-                                            resume_version,
-                                            resume_full_path,
+                                            selected_resume_id,
                                             cover_letter_path,
                                             notes,
                                             date_str,
@@ -518,6 +508,10 @@ def render_job_browser(
                             )
                             cursor.execute(
                                 "DELETE FROM interview_stages WHERE job_id = ?",
+                                (job["id"],),
+                            )
+                            cursor.execute(
+                                "DELETE FROM resume_tailoring_runs WHERE job_id = ?",
                                 (job["id"],),
                             )
                             cursor.execute(

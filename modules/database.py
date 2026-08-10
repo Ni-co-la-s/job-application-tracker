@@ -1,153 +1,49 @@
 """Database module for job application tracker."""
 
-import logging
 import sqlite3
 from typing import Any
 
 from constants import JOBS_DB
-
-logger = logging.getLogger(__name__)
+from modules.migrations import (
+    MigrationRequiredError,
+    apply_pending_migrations,
+    get_pending_migrations,
+    get_schema_version,
+    has_existing_schema,
+)
 
 
 class JobDatabase:
     """Database handler for job applications."""
 
-    def __init__(self, db_path: str = JOBS_DB) -> None:
-        """Initialize database connection and create tables.
+    def __init__(
+        self,
+        db_path: str = JOBS_DB,
+        *,
+        allow_migrations: bool = False,
+    ) -> None:
+        """Initialize the connection and ensure the schema is current.
 
         Args:
             db_path: Path to SQLite database file.
+            allow_migrations: Apply pending migrations to an existing database.
+                Empty databases are initialized without approval because they
+                contain no user data to back up.
         """
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._create_tables()
-
-    def _create_tables(self) -> None:
-        """Create database tables if they don't exist."""
-        cursor = self.conn.cursor()
-
-        # Jobs table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_url TEXT UNIQUE NOT NULL,
-                site TEXT,
-                job_url_direct TEXT,
-                title TEXT,
-                company TEXT,
-                company_linkedin_id INTEGER,
-                location TEXT,
-                date_posted DATE,
-                date_scraped DATETIME DEFAULT CURRENT_TIMESTAMP,
-                job_type TEXT,
-                salary_source TEXT,
-                interval TEXT,
-                min_amount REAL,
-                max_amount REAL,
-                currency TEXT,
-                is_remote BOOLEAN,
-                job_level TEXT,
-                job_function TEXT,
-                description TEXT,
-                company_industry TEXT,
-                company_url TEXT,
-                company_logo TEXT,
-                company_url_direct TEXT,
-                company_addresses TEXT,
-                company_num_employees TEXT,
-                company_revenue TEXT,
-                company_description TEXT,
-
-                -- scoring / pipeline
-                llm_score INTEGER,
-                llm_reasoning TEXT,
-                heuristic_score REAL,
-                job_hash TEXT,
-                extracted_skills TEXT,
-                matched_skills TEXT,
-                partial_skills TEXT,
-                missing_skills TEXT,
-
-                archived BOOLEAN DEFAULT 0
-            )
-        """)
-
-        self._ensure_column("jobs", "company_linkedin_id", "INTEGER")
-
-        # Applications table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            application_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resume_version TEXT,
-            resume_file_path TEXT,
-            cover_letter_path TEXT,
-            notes TEXT,
-            FOREIGN KEY (job_id) REFERENCES jobs(id)
-        )
-        """)
-
-        # Interview stages table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS interview_stages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            stage TEXT NOT NULL,
-            stage_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-            notes TEXT,
-            FOREIGN KEY (job_id) REFERENCES jobs(id)
-        )
-        """)
-
-        # Status options:
-        # - no_response
-        # - automatic_rejection
-        # - phone_screen
-        # - technical_interview
-        # - behavioral_interview
-        # - final_interview
-        # - offer_received
-        # - offer_accepted
-        # - offer_declined
-        # - rejected
-
-        self.conn.commit()
-
-        # Create indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_job_hash 
-            ON jobs(job_hash) 
-            WHERE job_hash IS NOT NULL
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_company_hash 
-            ON jobs(company, job_hash) 
-            WHERE job_hash IS NOT NULL
-        """)
-
-        cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_date_hash 
-        ON jobs(date_scraped, job_hash) 
-        WHERE job_hash IS NOT NULL
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_archived 
-            ON jobs(archived)
-        """)
-
-        self.conn.commit()
-
-    def _ensure_column(self, table: str, column: str, column_definition: str) -> None:
-        """Add a column to an existing SQLite table if it is missing for migrations."""
-        cursor = self.conn.cursor()
-        cursor.execute(f"PRAGMA table_info({table})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-        if column not in existing_columns:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_definition}")
-            self.conn.commit()
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            pending = get_pending_migrations(self.conn)
+            if pending and has_existing_schema(self.conn) and not allow_migrations:
+                raise MigrationRequiredError(
+                    current_version=get_schema_version(self.conn),
+                    migrations=pending,
+                )
+            apply_pending_migrations(self.conn)
+        except Exception:
+            self.conn.close()
+            raise
 
     def insert_job(self, job_data: dict[str, Any]) -> int:
         """Insert or update a job.
@@ -244,8 +140,7 @@ class JobDatabase:
     def mark_applied(
         self,
         job_id: int,
-        resume_version: str,
-        resume_path: str,
+        resume_id: int,
         cover_letter_path: str | None = None,
         notes: str | None = None,
         application_date: str | None = None,
@@ -254,8 +149,7 @@ class JobDatabase:
 
         Args:
             job_id: ID of the job to mark as applied.
-            resume_version: Version identifier of the resume used.
-            resume_path: Path to the resume file.
+            resume_id: Registry ID of the resume used.
             cover_letter_path: Optional path to cover letter file.
             notes: Optional application notes.
             application_date: Optional application date (YYYY-MM-DD format).
@@ -266,14 +160,13 @@ class JobDatabase:
         if application_date:
             cursor.execute(
                 """
-                INSERT INTO applications (job_id, resume_version, resume_file_path, 
-                                        cover_letter_path, notes, application_date)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO applications (job_id, resume_id,
+                                          cover_letter_path, notes, application_date)
+                VALUES (?, ?, ?, ?, ?)
             """,
                 (
                     job_id,
-                    resume_version,
-                    resume_path,
+                    resume_id,
                     cover_letter_path,
                     notes,
                     application_date,
@@ -282,11 +175,11 @@ class JobDatabase:
         else:
             cursor.execute(
                 """
-                INSERT INTO applications (job_id, resume_version, resume_file_path, 
-                                        cover_letter_path, notes)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO applications (job_id, resume_id,
+                                          cover_letter_path, notes)
+                VALUES (?, ?, ?, ?)
             """,
-                (job_id, resume_version, resume_path, cover_letter_path, notes),
+                (job_id, resume_id, cover_letter_path, notes),
             )
         self.conn.commit()
 
@@ -348,11 +241,15 @@ class JobDatabase:
         query = """
             SELECT j.*, 
                 a.application_date,
-                a.resume_version,
-                a.resume_file_path,
+                a.resume_id,
+                r.name AS resume_name,
+                r.path AS resume_path,
+                r.name AS resume_version,
+                r.path AS resume_file_path,
                 GROUP_CONCAT(i.stage || ' (' || i.stage_date || ')') as stages
             FROM jobs j
             LEFT JOIN applications a ON j.id = a.job_id
+            LEFT JOIN resumes r ON a.resume_id = r.id
             LEFT JOIN interview_stages i ON j.id = i.job_id
             WHERE 1=1
         """
@@ -556,13 +453,224 @@ class JobDatabase:
             Application dictionary or None if not found.
         """
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM applications WHERE job_id = ?", (job_id,))
+        cursor.execute(
+            """
+            SELECT a.*, r.name AS resume_name, r.path AS resume_path,
+                   r.kind AS resume_kind, r.archived AS resume_archived
+            FROM applications a
+            LEFT JOIN resumes r ON r.id = a.resume_id
+            WHERE a.job_id = ?
+            """,
+            (job_id,),
+        )
         row = cursor.fetchone()
 
         if row:
             columns = [desc[0] for desc in cursor.description]
             return dict(zip(columns, row))
         return None
+
+    def save_resume_tailoring_run(
+        self,
+        job_id: int,
+        base_template: str,
+        output_path: str,
+        edits_json: str,
+        model_base_url: str | None = None,
+        model_name: str | None = None,
+        *,
+        commit: bool = True,
+    ) -> int:
+        """Insert one saved resume tailoring run record.
+
+        Args:
+            job_id: ID of the job being tailored for.
+            base_template: Name of the LaTeX template folder.
+            output_path: Saved PDF path.
+            edits_json: JSON snapshot of final applied edits.
+
+        Returns:
+            New saved tailoring run ID.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO resume_tailoring_runs
+                (job_id, base_template, output_path, edits_json,
+                 model_base_url, model_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                job_id,
+                base_template,
+                output_path,
+                edits_json,
+                model_base_url,
+                model_name,
+            ),
+        )
+        if commit:
+            self.conn.commit()
+        return cursor.lastrowid
+
+    def get_resume_tailoring_runs_for_job(self, job_id: int) -> list[dict[str, Any]]:
+        """Get tailoring runs for a job, newest first."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM resume_tailoring_runs
+            WHERE job_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (job_id,),
+        )
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_resume_tailoring_run(self, run_id: int) -> dict[str, Any] | None:
+        """Get a single resume tailoring run by ID."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM resume_tailoring_runs WHERE id = ?", (run_id,))
+        row = cursor.fetchone()
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+        return None
+
+    def create_resume(
+        self,
+        name: str,
+        path: str,
+        kind: str,
+        source_tailoring_run_id: int | None = None,
+        *,
+        commit: bool = True,
+    ) -> int:
+        """Register one managed resume and return its ID."""
+        if kind not in {"tex", "pdf"}:
+            raise ValueError("Resume kind must be 'tex' or 'pdf'")
+        cursor = self.conn.execute(
+            """
+            INSERT INTO resumes (name, path, kind, source_tailoring_run_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name.strip(), path, kind, source_tailoring_run_id),
+        )
+        if commit:
+            self.conn.commit()
+        return cursor.lastrowid
+
+    def get_resume(self, resume_id: int) -> dict[str, Any] | None:
+        """Return one resume with tailoring/job provenance."""
+        cursor = self.conn.execute(
+            """
+            SELECT r.*, tr.job_id AS tailored_job_id,
+                   tr.model_name, tr.model_base_url,
+                   j.title AS tailored_job_title, j.company AS tailored_job_company
+            FROM resumes r
+            LEFT JOIN resume_tailoring_runs tr
+                ON tr.id = r.source_tailoring_run_id
+            LEFT JOIN jobs j ON j.id = tr.job_id
+            WHERE r.id = ?
+            """,
+            (resume_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(zip((item[0] for item in cursor.description), row))
+
+    def list_resumes(
+        self,
+        archive_status: str = "active",
+        kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List registry resumes alphabetically with optional filters."""
+        query = """
+            SELECT r.*, tr.job_id AS tailored_job_id,
+                   tr.model_name, tr.model_base_url,
+                   j.title AS tailored_job_title, j.company AS tailored_job_company,
+                   (SELECT COUNT(*) FROM applications a WHERE a.resume_id = r.id)
+                       AS application_count
+            FROM resumes r
+            LEFT JOIN resume_tailoring_runs tr
+                ON tr.id = r.source_tailoring_run_id
+            LEFT JOIN jobs j ON j.id = tr.job_id
+            WHERE 1=1
+        """
+        params: list[Any] = []
+        if archive_status == "active":
+            query += " AND r.archived = 0"
+        elif archive_status == "archived":
+            query += " AND r.archived = 1"
+        if kind:
+            query += " AND r.kind = ?"
+            params.append(kind)
+        query += " ORDER BY lower(r.name), r.id"
+        cursor = self.conn.execute(query, params)
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_application_resume_options(self, job_id: int) -> list[dict[str, Any]]:
+        """Return active PDFs, prioritizing resumes tailored for ``job_id``."""
+        cursor = self.conn.execute(
+            """
+            SELECT r.*, tr.job_id AS tailored_job_id,
+                   CASE WHEN tr.job_id = ? THEN 1 ELSE 0 END AS matches_job
+            FROM resumes r
+            LEFT JOIN resume_tailoring_runs tr
+                ON tr.id = r.source_tailoring_run_id
+            WHERE r.archived = 0 AND r.kind = 'pdf'
+            ORDER BY CASE WHEN tr.job_id = ? THEN 0 ELSE 1 END,
+                     lower(r.name), r.id
+            """,
+            (job_id, job_id),
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def set_resume_archived(self, resume_id: int, archived: bool) -> None:
+        """Archive or unarchive a resume."""
+        self.conn.execute(
+            "UPDATE resumes SET archived = ? WHERE id = ?",
+            (int(archived), resume_id),
+        )
+        self.conn.commit()
+
+    def count_resume_applications(self, resume_id: int) -> int:
+        """Return how many applications reference a resume."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM applications WHERE resume_id = ?", (resume_id,)
+        ).fetchone()[0]
+
+    def delete_resume_record(self, resume_id: int, *, commit: bool = True) -> None:
+        """Delete an unused resume record, refusing referenced resumes."""
+        usage_count = self.count_resume_applications(resume_id)
+        if usage_count:
+            raise ValueError(
+                f"Resume is used by {usage_count} application(s) and cannot be deleted"
+            )
+        self.conn.execute("DELETE FROM resumes WHERE id = ?", (resume_id,))
+        if commit:
+            self.conn.commit()
+
+    def get_resume_counts(self) -> dict[str, int]:
+        """Return compact registry counts for the dashboard sidebar."""
+        row = self.conn.execute(
+            """
+            SELECT COUNT(*),
+                   SUM(CASE WHEN archived = 0 AND kind = 'pdf' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN archived = 0 AND kind = 'tex' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END)
+            FROM resumes
+            """
+        ).fetchone()
+        return {
+            "total": row[0] or 0,
+            "active_pdf": row[1] or 0,
+            "active_tex": row[2] or 0,
+            "archived": row[3] or 0,
+        }
 
     def get_interview_stages_by_job_id(self, job_id: int) -> list[dict[str, Any]]:
         """Get all interview stages for a job.
@@ -655,8 +763,7 @@ class JobDatabase:
             # Update existing application
             editable_fields = {
                 "application_date",
-                "resume_version",
-                "resume_file_path",
+                "resume_id",
                 "cover_letter_path",
                 "notes",
             }

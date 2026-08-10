@@ -10,6 +10,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from constants import PROMPTS_FILE
 
+PROMPTS_EXAMPLE_FILE = f"{PROMPTS_FILE}.example"
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +30,43 @@ def load_prompts() -> dict[str, Any]:
     except json.JSONDecodeError as e:
         logger.error(f"Error loading {PROMPTS_FILE}: {e}")
         return {}
+
+
+def ensure_prompt_defaults() -> list[str]:
+    """Merge missing prompt keys from the tracked example into user prompts.
+
+    Existing user prompt values are never overwritten. The returned list contains
+    keys that were added to ``PROMPTS_FILE``.
+    """
+    prompts_path = Path(PROMPTS_FILE)
+    example_path = Path(PROMPTS_EXAMPLE_FILE)
+    if not prompts_path.exists() or not example_path.exists():
+        return []
+
+    try:
+        user_prompts = json.loads(prompts_path.read_text(encoding="utf-8"))
+        default_prompts = json.loads(example_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        logger.error(f"Could not merge prompt defaults due to invalid JSON: {exc}")
+        return []
+
+    if not isinstance(user_prompts, dict) or not isinstance(default_prompts, dict):
+        logger.error(
+            "Could not merge prompt defaults: prompt files must contain JSON objects"
+        )
+        return []
+
+    added_keys = [key for key in default_prompts if key not in user_prompts]
+    if not added_keys:
+        return []
+
+    for key in added_keys:
+        user_prompts[key] = default_prompts[key]
+    prompts_path.write_text(
+        json.dumps(user_prompts, indent=4, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return added_keys
 
 
 # Load prompts once when module is imported. They can be refreshed from the
@@ -60,3 +99,4 @@ SKILLS_EXTRACTION_PROMPT = get_prompt("SKILLS_EXTRACTION_PROMPT", "")
 SKILLS_MATCHING_PROMPT = get_prompt("SKILLS_MATCHING_PROMPT", "")
 JOB_SCORING_PROMPT = get_prompt("JOB_SCORING_PROMPT", "")
 JOB_SCORING_SYSTEM_PROMPT = get_prompt("JOB_SCORING_SYSTEM_PROMPT", "")
+RESUME_TAILORING_PROMPT = get_prompt("RESUME_TAILORING_PROMPT", "")

@@ -1,0 +1,89 @@
+"""LaTeX PDF build utilities for resume tailoring."""
+
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+
+LATEX_BUILD_TMP_DIR = Path(".latex-build-tmp")
+
+
+class LatexBuildError(Exception):
+    """Raised when LaTeX compilation fails."""
+
+    def __init__(self, message: str, full_log: str | None = None):
+        super().__init__(message)
+        self.full_log = full_log or ""
+
+
+def build_pdf(
+    tex_source: str,
+    template_dir: Path | None = None,
+    engine: str = "auto",
+    timeout: int = 120,
+) -> bytes:
+    """Compile LaTeX source to PDF bytes in an isolated temporary directory.
+
+    The full template folder is copied into the temp directory first, then
+    ``resume.tex`` is overwritten with ``tex_source``. This preserves local
+    assets such as .cls/.sty files, fonts, images, and subfolders while keeping
+    generated artifacts out of the source template directory.
+    """
+    LATEX_BUILD_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="latex-build-", dir=LATEX_BUILD_TMP_DIR
+    ) as td:
+        work = Path(td)
+        if template_dir and template_dir.is_dir():
+            shutil.copytree(template_dir, work, dirs_exist_ok=True)
+
+        (work / "resume.tex").write_text(tex_source, encoding="utf-8")
+        cmd = _resolve_engine(engine)
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=work,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except FileNotFoundError as exc:
+            raise LatexBuildError(f"Build tool not found on PATH: {cmd[0]}") from exc
+        except subprocess.TimeoutExpired as exc:
+            output = ""
+            if exc.stdout:
+                output += str(exc.stdout)
+            if exc.stderr:
+                output += str(exc.stderr)
+            raise LatexBuildError("Compilation timed out.", output) from exc
+
+        pdf = work / "resume.pdf"
+        if proc.returncode != 0 or not pdf.exists():
+            log = work / "resume.log"
+            text = (
+                log.read_text(errors="ignore")
+                if log.exists()
+                else (proc.stdout + proc.stderr)
+            )
+            errs = "\n".join(line for line in text.splitlines() if line.startswith("!"))
+            raise LatexBuildError(
+                errs or "Unknown LaTeX error. Full log is shown below.", text
+            )
+
+        return pdf.read_bytes()
+
+
+def _resolve_engine(engine: str) -> list[str]:
+    """Resolve the requested LaTeX engine to a subprocess command."""
+    if engine in ("auto", "tectonic") and shutil.which("tectonic"):
+        return ["tectonic", "resume.tex"]
+
+    if shutil.which("latexmk"):
+        flag = {"xe": "-pdfxe", "lua": "-pdflua"}.get(engine, "-pdf")
+        return ["latexmk", flag, "-interaction=nonstopmode", "resume.tex"]
+
+    raise LatexBuildError(
+        "No LaTeX engine found. Install Tectonic or a TeX distribution."
+    )

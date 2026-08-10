@@ -355,7 +355,7 @@ def get_sql_editor_completions(conn: Any) -> list[dict[str, Any]]:
             column_name = column[1]
             column_type = column[2] or "column"
             add_completion(column_name, f"column · {column_type}", 900)
-    
+
     return completions
 
 
@@ -365,7 +365,13 @@ def render_schema_reference(conn: Any) -> None:
     Args:
         conn: Database connection.
     """
-    tables = ["jobs", "applications", "interview_stages", "resume_tailoring_runs"]
+    tables = [
+        "jobs",
+        "applications",
+        "interview_stages",
+        "resume_tailoring_runs",
+        "resumes",
+    ]
 
     for table in tables:
         with st.expander(f"📋 **{table}**"):
