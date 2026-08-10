@@ -1,218 +1,170 @@
 # Job Application Tracker
 
-An automated job search and tracking platform that uses Large Language Models (LLMs) to scrape, evaluate, and organize job postings. The system features a multi-stage LangGraph pipeline that scores job opportunities based on their alignment with your specific resume, technical skills, and experience bank.
 
-<img width="2557" height="1269" alt="Job Application Tracker Dashboard" src="https://github.com/user-attachments/assets/d5705efa-eadb-4dac-b959-543e3e865dd4" />
-
-## Core Features
-
-### Multi-Site Scraping
-
-Using **[JobSpy](https://github.com/speedyapply/JobSpy)** to aggregate listings from Indeed, LinkedIn, Glassdoor, and ZipRecruiter, with deduplication using simhash.
-
-Current scraper guidance:
-- **Recommended:** Indeed and LinkedIn
-- **ZipRecruiter:** available only in the US and not yet very tested
-- **Glassdoor:** sometimes does not retrieve the full description correctly
-
-<img width="2556" height="1272" alt="Scraping configuration" src="https://github.com/user-attachments/assets/8130eac5-a27b-43e4-acaa-5eb2865833d4" />
-
-### Automated Evaluation
-
-Jobs are scored on a 1-10 scale using a customizable LLM pipeline that provides written reasoning for every score.
-
-### Contextual AI Chat
-
-A dedicated interface to interact with job descriptions for drafting cover letters or asking custom questions.
-
-<img width="2558" height="1270" alt="AI Chat Interface" src="https://github.com/user-attachments/assets/9ff160b1-7d74-40d3-82f6-dca3ef45ae95" />
-
-### AI Resume Tailoring
-
-Generate job-specific LaTeX resume edits from a selected job posting, review each search/replacement edit individually, compile an in-app PDF preview, and save the approved PDF in the database.
-
-The tailoring workflow uses:
-- `config/resume.txt` as the full information bank of your experience, projects, and skills.
-- `Resumes/tex/<template-name>/resume.tex` as the editable LaTeX target.
-- The selected job's stored database description as the target job context.
-
-### Resume and Application Tracking
-
-Import PDF resumes and LaTeX resume projects from **User Config → Resumes**. Resumes are stored in a database-backed registry, can be archived when no longer current, and can be selected when marking a job as applied.
-
-When applying to a job, the resume picker retrieves them from the database. If you generated a tailored resume for that job, it is shown first.
-
-### Data Analytics
-
-Run custom SQL queries for analytics and visualization.
-
-<img width="2559" height="1279" alt="Analytics Dashboard" src="https://github.com/user-attachments/assets/c9ef3d1d-a419-41f4-a62e-a2a7ad22e9e9" />
+A LLM-assisted workspace for finding and evaluating jobs, as well as tracking job applications. It combines multi-site scraping, LLM scoring, application management, resume tailoring and analytics in a local Streamlit dashboard.
 
 
-## Technical Architecture
+<p align="center">
+  <img
+    src="assets/images/landing_page.png"
+    alt="Job Application Tracker dashboard"
+    width="1000"
+  />
+</p>
+## Quick Start
 
-The system processes every job through a structured LangGraph workflow to ensure accuracy and cost-efficiency:
+Requires Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
+AI features require an OpenAI-compatible API.
+Resume tailoring requires Tectonic or a TeX distribution providing latexmk; [Tectonic](https://tectonic-typesetting.github.io/) is recommended.
 
-1. **Deduplication**: Simhash algorithms compare the "fingerprint" of job descriptions against the existing database to ignore redundant listings.
-2. **Skill Extraction**: Technical requirements are extracted into a structured JSON format.
-3. **Heuristic Matching**: A comparison is performed against your skills to filter out irrelevant roles. 
-4. **Deep Scoring**: Non filtered out matches undergo a final evaluation where an LLM compares the full job description against your resume to provide a final fit score.
-
-## Installation
-
-### Prerequisites
-
-- Python 3.12 or higher (not tested on older versions yet)
-- `uv` (Recommended package manager) or pip
-- An OpenAI-compatible API key or local LLLM setup (Supports OpenAI, DeepSeek, Anthropic, llama.cpp or LM Studio...)
-- Optional for resume tailoring: [Tectonic](https://tectonic-typesetting.github.io/) or a TeX distribution with `latexmk` on your PATH. Tectonic is recommended.
-
-### Setup
-
-1. **Clone the repository**
 
 ```bash
-git clone 
+git clone https://github.com/Ni-co-la-s/job-application-tracker.git
 cd job-application-tracker
-```
-
-2. **Install dependencies**
-
-```bash
 uv sync
+uv run streamlit run dashboard.py
 ```
 
-or
+On first launch, the dashboard creates missing local configuration files from their tracked `.example` templates. Open **User Config → LLM Settings** to configure models, API keys, and base URLs before using AI features.
 
-```bash
-pip install -e .
+## What It Does
+
+- **Multi-site scraping:** Collect listings from Indeed, LinkedIn, Glassdoor, and ZipRecruiter.
+- **Deduplication:** Use simhash fingerprints to avoid storing substantially identical jobs.
+- **Automated evaluation:** Extract required skills, compare them with your profile, and score each job from 1–10 with written reasoning.
+- **Job tracking:** Browse, archive, edit, and mark jobs as applied with the resume used.
+- **AI tools:** Chat about job descriptions, test prompts, and tailor LaTeX resumes.
+- **Resume registry:** Import your resumes for tracking which ones you use for applications.
+- **Analytics:** Run saved or custom SQL queries and visualize the results to analyze your job searching process.
+
+Scraping uses my [JobSpy fork](https://github.com/Ni-co-la-s/JobSpy), which adds LinkedIn company ID filtering to the original JobSpy functionalities.
+
+### Analytics
+
+Saved and custom SQL queries can be visualized directly in the dashboard.
+
+<p align="center">
+  <img
+    src="assets/images/analytics.png"
+    alt="Job Application Tracker dashboard"
+    width="1000"
+  />
+</p>
+
+## Essential Configuration
+
+Most configuration files can be edited directly from the dashboard.
+
+| File | Purpose | Dashboard location |
+|---|---|---|
+| `.env` | Models, API keys, and OpenAI-compatible endpoints | User Config → LLM Settings |
+| `config/resume.txt` | Your full experience context used for scoring and tailoring (passed as is to LLMs so if using cloud models, you should leave out information you don't want passed) | User Config → Profile Files |
+| `config/candidate_skills.txt` | List of your skills used for heuristic matching | User Config → Profile Files |
+| `config/searches.txt` | List of job searches performed by the scraper on chosen job boards | Scraping |
+| `config/prompts.json` | Prompts used for extraction, matching, scoring, and tailoring | User Config → Prompts |
+| `config/presets.json` | Saved prompt templates for your AI Chats | AI Tools |
+| `config/queries.json` | Saved SQL queries used for visualization | Analytics |
+| `config/interview_stages.json` | Interview stage definitions (ideally should not be changed) | Not available in dashboard |
+
+### LLM Settings
+
+Each pipeline stage has its own model configuration:
+
+```env
+SKILLS_EXTRACTION_MODEL=gpt-4.1-nano
+SKILLS_EXTRACTION_API_KEY=sk-...
+SKILLS_EXTRACTION_BASE_URL=https://api.openai.com/v1
+
+SKILLS_MATCHING_MODEL=gpt-4.1-mini
+SKILLS_MATCHING_API_KEY=sk-...
+SKILLS_MATCHING_BASE_URL=https://api.openai.com/v1
+
+JOB_SCORING_MODEL=gpt-4.1-mini
+JOB_SCORING_API_KEY=sk-...
+JOB_SCORING_BASE_URL=https://api.openai.com/v1
+
+CHAT_MODEL=Qwen3 8B
+CHAT_API_KEY= ...
+CHAT_BASE_URL='http://localhost:8000/v1'
+
+RESUME_TAILORING_MODEL=gpt-4o-mini
+RESUME_TAILORING_API_KEY= ...
+RESUME_TAILORING_BASE_URL=https://api.openai.com/v1
 ```
 
-3. **Initialize Configuration**
+### Search Definitions
 
-On first dashboard startup, missing user files are automatically created from tracked `.example` templates.
-
-This includes `.env` and the files in `config/`. Afterwards, you can edit `.env` real API keys, model names, and base URLs either directly in the file or from the dashboard's **User Config → LLM Settings** tab before LLM calls will work.
-
-If you prefer to initialize files manually before the first run:
-
-```bash
-# Windows
-copy .env.example .env
-copy config\*.example config\*
-
-# Linux/macOS
-cp .env.example .env
-for f in config/*.example; do cp "$f" "${f%.example}"; done
-```
-
-4. **Add Resume PDF and/or LaTeX Templates**
-
-Start the dashboard and go to **User Config → Resumes** to import your resumes.
-
-You can import:
-
-- a PDF resume, which is copied to `Resumes/final/` and used when marking jobs as applied;
-- a standalone `resume.tex` file (entrypoint);
-- a zipped LaTeX project containing one `resume.tex` (entrypoint).
-
-PDF resumes are used for application tracking and are not passed to LLMs. Archived resumes stay in the registry but are hidden from the application resume picker.
-
-For AI Resume Tailoring, place LaTeX sources under:
+Add one search per line to `config/searches.txt`:
 
 ```text
-Resumes/tex/<template-name>/resume.tex
-Resumes/tex/<template-name>/*.cls, *.sty, fonts, images, etc.
+job title|location|country
+job title|location|country|linkedin_company_ids
 ```
 
-Each template folder should contain one editable `resume.tex` plus any supporting files. The AI only edits `resume.tex`; if resume content is split across `\input` or `\include` files, that content will not be tailored. Keep resume content in `resume.tex` for best results.
+Examples:
 
-Optional per-template PII redaction for AI Resume Tailoring, which is applied to the resume.tex file only:
+```text
+SEO Specialist|Berlin|Germany
+Data Scientist|European Union|worldwide|1441,1035
+```
+
+LinkedIn company IDs are optional comma-separated integers that allows having searches for specific companies for linkedin only. They can be found in LinkedIn job-search URLs, such as `f_C=1441`.
+Since the scraping from linkedin also retrieves the company_ids, you can also try to retrieve them from your database.
+LinkedIn and ZipRecruiter primarily use `location`; Indeed and Glassdoor also use `country`.
+Indeed and LinkedIn are the recommended sources. ZipRecruiter is US-only and I have not tested it, while Glassdoor has had some parsing problems recently.
+
+## Resume Management and Tailoring
+
+Use **User Config → Resumes** to import your resumes as either:
+
+- PDF resumes for application tracking;
+- a standalone `resume.tex` entrypoint;
+- a zipped LaTeX project containing one `resume.tex` entrypoint.
+
+PDF resumes are copied to `Resumes/final/`. LaTeX projects are stored under `Resumes/tex/<template-name>/resume.tex`.
+
+In zipped LaTeX projects, you can have `.cls`, `.sty`, font, image files... in addition to `resume.tex`. The tailoring workflow only edits `resume.tex`, so other content will not be accessible to the AI.
+
+If you have some information in your resume that you do not want the LLM to access, optional PII redactions can be configured per template in:
 
 ```text
 Resumes/tex/<template-name>/pii_redactions.txt
 ```
 
-One literal string per line. Redaction strings must be written exactly as they appear in the `.tex`.
+In this file, add one exact literal string per line that you want ignored.
 
-## Configuration
+For example
 
-The system relies on local files in the `config/` directory to personalize the matching logic. You can modify them to match your expectations.
-
-- **searches.txt**: Define job searches using `job_title|location|country` (or `job_title|location|country|linkedin_company_ids`). Can be modified in the **Scraping** tab of the dashboard.
-  - Example: `Test engineer|Berlin|Germany`
-  - LinkedIn company-targeted example: `Data Scientist|Berlin|Germany|1441,1035`
-  - `linkedin_company_ids` is optional and must be comma-separated integers.
-  - Where to find LinkedIn company IDs? Open the company page on LinkedIn, go on jobs, pass a query and copy the numeric id from the URL (for example `https://www.linkedin.com/jobs/search/?f_C=1441` → `1441`).
-  - LinkedIn supports location clusters (for example regions) in the `location` field, see: https://www.linkedin.com/help/recruiter/answer/a524054
-  - Example for LinkedIn cluster search: `Data Scientist|Latin America|worldwide`
-  - Site-specific behavior:
-    - only `location` is used for LinkedIn and ZipRecruiter
-    - `country` is used for Indeed and Glassdoor, `location` helps narrowing down (supported countries: https://github.com/speedyapply/JobSpy?tab=readme-ov-file#supported-countries-for-job-searching)
-  - Important: if you use LinkedIn-specific cluster values (like `Latin America|worldwide`) while also scraping Indeed/Glassdoor in the same run, Indeed/Glassdoor may return no results for those entries.
-- **resume.txt**: Your resume in plain text for LLM processing. This is different from the resumes in Resumes/final/ and will be passed to LLMs when scoring the jobs found.
-  - Can be modified in the **User Config → Profile Files** tab of the dashboard.
-  - For AI Resume Tailoring, this file is treated as the information bank: a superset of your experience and projects that the model may draw from without inventing facts.
-- **candidate_skills.txt**: A list of your primary technical skills (one per line). The skills extracted from the jobs will then be matched to them. Can be modified in the **User Config → Profile Files** tab of the dashboard.
-- **prompts.json**: Contains the prompts for extraction, matching, scoring, and resume tailoring logic. Can be modified in the **User Config → Prompts** tab of the dashboard.
-- **presets.json**: Saved prompt templates for the AI Chat interface. Can be modified in the **AI Tools** tab of the dashboard.
-- **queries.json**: Saved SQL analytics queries with their recommended visualization type and description. Can be modified in the **Analytics** tab of the dashboard.
-- **interview_stages.json**: Interview stages for tracking application stages (refusal, offers, phone screening...). Defaults are created from `interview_stages.json.example`. Be careful changing this after you have saved stages in the database.
-
-## Usage
-
-### Streamlit Dashboard
-
-The primary interface. It allows you to run scrapers, browse matches, use AI tools and run analytics with SQL.
-
-```bash
-uv run streamlit run dashboard.py
+```text
+John Smith
++1 0123456789 
+john.smith@email.com
+New-York
 ```
 
-### AI Resume Tailoring Setup
+Redactions are applied to `resume.tex` before its content is sent to the configured tailoring model.
 
-The Resume Tailoring tab requires its own dedicated LLM configuration. It does not fall back to the chat or scoring model. Set these variables in `.env`:
+The tailoring interface shows each proposed search-and-replacement edit for individual review before it is applied:
 
-```env
-RESUME_TAILORING_MODEL=gpt-4o-mini
-RESUME_TAILORING_API_KEY=sk-...
-RESUME_TAILORING_BASE_URL=https://api.openai.com/v1
-```
+<p align="center">
+  <img
+    src="assets/images/resume_tailoring.png"
+    alt="Job Application Tracker dashboard"
+    width="1000"
+  />
+</p>
 
-Saved tailored resumes are registered automatically and linked to the tailoring run that generated them, including the model name and base URL used.
+After tailoring, you can build the result as a PDF before saving it.
+[Tectonic](https://tectonic-typesetting.github.io/) is recommended for the LaTeX engine and is required on path for the functionality to work.
 
-The tab compiles PDFs using a system LaTeX engine:
-
-1. Prefer `tectonic` if available.
-2. Fall back to `latexmk -pdf`.
-3. For fontspec templates, select the XeLaTeX or LuaLaTeX option in the UI, which uses `latexmk -pdfxe` or `latexmk -pdflua`.
-
-Some pdflatex-only templates may need tweaks when compiled with Tectonic or XeLaTeX/LuaLaTeX.
-
-### Managing Resumes
-
-Use **User Config → Resumes** to:
-
-- import PDF resumes and LaTeX resume projects;
-- search/select resumes from the registry;
-- filter by active/archived status and by type (`pdf`, `tex`, or all);
-- archive or unarchive resumes;
-- delete resumes that have not been used in an application.
-
-Deletion is blocked for resumes already referenced by applications, so application history remains consistent.
-
-### Standalone Scraper
-
-Run the scraping and evaluation pipeline from the command line for automated tasks.
-
-```bash
-uv run python jobspy_scraper.py --resume config/resume.txt --sites indeed linkedin --hours-old 24
-```
+Resumes that are not foreseen to be used again can be archived to not have them visible as an option when applying. 
+Resumes that have not been used for an application can be deleted.
 
 
-## Performance Tips
+## Model recommandations
 
-- **Model Selection**: Use smaller, faster models for extraction and heuristic matching, and more capable models for the final scoring reasoning.
-- **Update prompts**: The generic prompts used for skills extraction, matching and scoring are available in config/prompts.json. They can be tuned if the results are not satisfactory to you.   
-- **Batch Size**: Adjust the `batch-size` parameter based on your API rate limits. For local models, depending on your VRAM and setup, using a smaller batch size is recommended.
-- **Score Filtering**: Use the `--min-score` flag in the scraper to only save jobs that meet a certain fit threshold, keeping your database clean.
+Since the different tasks have variable complexity, it is important to choose the models you use well. 
+Currently, I use deepseek-v4-flash for skill extraction, skill matching, job scoring and chat since it is the most cost efficient option (in my workload, I have been able to process up to 2500 jobs for less than $1).
+Reasoning it not really useful for everything except job scoring (and the model overthinks quite a bit with reasoning enabled so it is significantly more expensive).
+
+Resume Tailoring is a way more difficult task, for it I currently use gpt-5.6.
