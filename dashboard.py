@@ -11,6 +11,11 @@ import streamlit as st
 
 import constants
 from modules.database import JobDatabase
+from modules.migrations import (
+    MigrationRequiredError,
+    UnsupportedDatabaseVersionError,
+    create_migration_backup,
+)
 from modules.prompts_loader import ensure_prompt_defaults, reload_prompts
 from tabs.ai_tools_tab import render_ai_tools
 from tabs.analytics_tab import render_analytics_tab
@@ -44,6 +49,69 @@ def init_session_state() -> None:
         st.session_state.title_text_filter = ""
     if "description_text_filter" not in st.session_state:
         st.session_state.description_text_filter = ""
+
+
+def initialize_database() -> JobDatabase:
+    """Initialize the database or block until its migration is approved."""
+    try:
+        database = JobDatabase(constants.JOBS_DB)
+    except UnsupportedDatabaseVersionError as error:
+        st.title("Database version not supported")
+        st.error(str(error))
+        st.info("Update the application before opening this database.")
+        st.stop()
+    except MigrationRequiredError as migration_required:
+        st.title("Database upgrade required")
+        st.warning(
+            "The dashboard needs to update your existing database before it can "
+            "continue. A verified, timestamped backup will be created first."
+        )
+        st.write(f"**Database:** `{Path(constants.JOBS_DB).resolve()}`")
+        st.write(
+            f"**Backup folder:** "
+            f"`{Path(constants.JOBS_DB).resolve().parent / 'backups'}`"
+        )
+        st.write(
+            f"**Schema version:** {migration_required.current_version} → "
+            f"{migration_required.migrations[-1].version}"
+        )
+        st.write("**Pending migrations:**")
+        for migration in migration_required.migrations:
+            st.write(f"- {migration.version}: {migration.name}")
+
+        accepted = st.checkbox(
+            "I understand that the database will be backed up and then updated."
+        )
+        if st.button(
+            "Create backup and migrate",
+            type="primary",
+            disabled=not accepted,
+        ):
+            try:
+                with st.spinner("Creating a verified backup..."):
+                    backup_path = create_migration_backup(constants.JOBS_DB)
+                with st.spinner("Applying database migrations..."):
+                    migrated_database = JobDatabase(
+                        constants.JOBS_DB,
+                        allow_migrations=True,
+                    )
+                    migrated_database.conn.close()
+            except Exception as error:
+                logger.exception("Database migration failed")
+                st.error(
+                    "The database was not upgraded. The migration was rolled back. "
+                    f"Details: {error}"
+                )
+                st.stop()
+
+            st.session_state["migration_backup_path"] = str(backup_path)
+            st.rerun()
+        st.stop()
+
+    backup_path = st.session_state.pop("migration_backup_path", None)
+    if backup_path:
+        st.success(f"Database upgraded successfully. Backup: `{backup_path}`")
+    return database
 
 
 def startup_check() -> bool:
@@ -136,7 +204,7 @@ def main() -> None:
         st.stop()
 
     # Initialize database
-    db = JobDatabase(constants.JOBS_DB)
+    db = initialize_database()
 
     # Sidebar filters
     st.sidebar.title("🔍 Filters")

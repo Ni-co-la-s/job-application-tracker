@@ -48,6 +48,5 @@ CoverLetters/
 .DS_Store
 Thumbs.db
 
-migrations.py
 test.py
 compare.py

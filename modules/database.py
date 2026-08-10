@@ -1,330 +1,48 @@
 """Database module for job application tracker."""
 
-import logging
 import sqlite3
 from typing import Any
 
 from constants import JOBS_DB
-
-logger = logging.getLogger(__name__)
+from modules.migrations import (
+    MigrationRequiredError,
+    apply_pending_migrations,
+    get_pending_migrations,
+    get_schema_version,
+    has_existing_schema,
+)
 
 
 class JobDatabase:
     """Database handler for job applications."""
 
-    def __init__(self, db_path: str = JOBS_DB) -> None:
-        """Initialize database connection and create tables.
+    def __init__(
+        self,
+        db_path: str = JOBS_DB,
+        *,
+        allow_migrations: bool = False,
+    ) -> None:
+        """Initialize the connection and ensure the schema is current.
 
         Args:
             db_path: Path to SQLite database file.
+            allow_migrations: Apply pending migrations to an existing database.
+                Empty databases are initialized without approval because they
+                contain no user data to back up.
         """
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.execute("PRAGMA foreign_keys = ON")
-        self._create_tables()
-
-    def _create_tables(self) -> None:
-        """Create database tables if they don't exist."""
-        cursor = self.conn.cursor()
-
-        # Jobs table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_url TEXT UNIQUE NOT NULL,
-                site TEXT,
-                job_url_direct TEXT,
-                title TEXT,
-                company TEXT,
-                company_linkedin_id INTEGER,
-                location TEXT,
-                date_posted DATE,
-                date_scraped DATETIME DEFAULT CURRENT_TIMESTAMP,
-                job_type TEXT,
-                salary_source TEXT,
-                interval TEXT,
-                min_amount REAL,
-                max_amount REAL,
-                currency TEXT,
-                is_remote BOOLEAN,
-                job_level TEXT,
-                job_function TEXT,
-                description TEXT,
-                company_industry TEXT,
-                company_url TEXT,
-                company_logo TEXT,
-                company_url_direct TEXT,
-                company_addresses TEXT,
-                company_num_employees TEXT,
-                company_revenue TEXT,
-                company_description TEXT,
-
-                -- scoring / pipeline
-                llm_score INTEGER,
-                llm_reasoning TEXT,
-                heuristic_score REAL,
-                job_hash TEXT,
-                extracted_skills TEXT,
-                matched_skills TEXT,
-                partial_skills TEXT,
-                missing_skills TEXT,
-
-                archived BOOLEAN DEFAULT 0
-            )
-        """)
-
-        self._ensure_column("jobs", "company_linkedin_id", "INTEGER")
-
-        # Interview stages table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS interview_stages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            stage TEXT NOT NULL,
-            stage_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-            notes TEXT,
-            FOREIGN KEY (job_id) REFERENCES jobs(id)
-        )
-        """)
-
-        # Resume tailoring runs table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS resume_tailoring_runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            base_template TEXT NOT NULL,
-            output_path TEXT,
-            edits_json TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (job_id) REFERENCES jobs(id)
-        )
-        """)
-
-        self._ensure_column("resume_tailoring_runs", "model_base_url", "TEXT")
-        self._ensure_column("resume_tailoring_runs", "model_name", "TEXT")
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS resumes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                path TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK (kind IN ('tex', 'pdf')),
-                source_tailoring_run_id INTEGER,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                archived BOOLEAN NOT NULL DEFAULT 0,
-                FOREIGN KEY (source_tailoring_run_id)
-                    REFERENCES resume_tailoring_runs(id) ON DELETE SET NULL
-            )
-        """)
-
-        self.conn.commit()
-        self._migrate_applications_to_resume_registry()
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS applications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id INTEGER NOT NULL,
-                application_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                resume_id INTEGER,
-                cover_letter_path TEXT,
-                notes TEXT,
-                FOREIGN KEY (job_id) REFERENCES jobs(id),
-                FOREIGN KEY (resume_id) REFERENCES resumes(id)
-            )
-        """)
-
-        # Status options:
-        # - no_response
-        # - automatic_rejection
-        # - phone_screen
-        # - technical_interview
-        # - behavioral_interview
-        # - final_interview
-        # - offer_received
-        # - offer_accepted
-        # - offer_declined
-        # - rejected
-
-        self.conn.commit()
-
-        # Create indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_job_hash 
-            ON jobs(job_hash) 
-            WHERE job_hash IS NOT NULL
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_company_hash 
-            ON jobs(company, job_hash) 
-            WHERE job_hash IS NOT NULL
-        """)
-
-        cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_date_hash 
-        ON jobs(date_scraped, job_hash) 
-        WHERE job_hash IS NOT NULL
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_archived 
-            ON jobs(archived)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_resume_tailoring_runs_job_id
-            ON resume_tailoring_runs(job_id)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_applications_resume_id
-            ON applications(resume_id)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_resumes_archived_kind_name
-            ON resumes(archived, kind, name)
-        """)
-
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_resumes_source_tailoring_run_id
-            ON resumes(source_tailoring_run_id)
-        """)
-
-        self.conn.commit()
-
-    def _ensure_column(self, table: str, column: str, column_definition: str) -> None:
-        """Add a column to an existing SQLite table if it is missing for migrations."""
-        cursor = self.conn.cursor()
-        cursor.execute(f"PRAGMA table_info({table})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-        if column not in existing_columns:
-            cursor.execute(
-                f"ALTER TABLE {table} ADD COLUMN {column} {column_definition}"
-            )
-            self.conn.commit()
-
-    def _table_columns(self, table: str) -> set[str]:
-        """Return column names for an existing SQLite table."""
-        cursor = self.conn.execute(f"PRAGMA table_info({table})")
-        return {row[1] for row in cursor.fetchall()}
-
-    def _migrate_applications_to_resume_registry(self) -> None:
-        """Replace legacy application resume text/path columns with ``resume_id``.
-
-        The old columns are the idempotent migration trigger. The entire table
-        rebuild is transactional, so a failure leaves the legacy schema intact.
-        """
-        columns = self._table_columns("applications")
-        legacy_columns = {"resume_version", "resume_file_path"}
-        if not legacy_columns.issubset(columns):
-            return
-
-        cursor = self.conn.cursor()
         try:
-            cursor.execute("BEGIN IMMEDIATE")
-            cursor.execute("""
-                CREATE TABLE applications_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id INTEGER NOT NULL,
-                    application_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    resume_id INTEGER,
-                    cover_letter_path TEXT,
-                    notes TEXT,
-                    FOREIGN KEY (job_id) REFERENCES jobs(id),
-                    FOREIGN KEY (resume_id) REFERENCES resumes(id)
+            pending = get_pending_migrations(self.conn)
+            if pending and has_existing_schema(self.conn) and not allow_migrations:
+                raise MigrationRequiredError(
+                    current_version=get_schema_version(self.conn),
+                    migrations=pending,
                 )
-            """)
-            cursor.execute("""
-                SELECT id, job_id, application_date, resume_version,
-                       resume_file_path, cover_letter_path, notes
-                FROM applications
-                ORDER BY application_date ASC, id ASC
-            """)
-            legacy_rows = cursor.fetchall()
-            resume_ids: dict[str, int] = {}
-
-            for row in legacy_rows:
-                (
-                    application_id,
-                    job_id,
-                    application_date,
-                    resume_version,
-                    resume_file_path,
-                    cover_letter_path,
-                    notes,
-                ) = row
-                resume_name = (resume_version or "").strip()
-                resume_id = None
-                if resume_name:
-                    resume_id = resume_ids.get(resume_name)
-                    if resume_id is None:
-                        existing = cursor.execute(
-                            "SELECT id, path FROM resumes WHERE name = ?",
-                            (resume_name,),
-                        ).fetchone()
-                        if existing:
-                            if (existing[1] or "") != (resume_file_path or ""):
-                                raise sqlite3.IntegrityError(
-                                    f"Legacy resume name {resume_name!r} maps to multiple paths"
-                                )
-                            resume_id = existing[0]
-                        else:
-                            suffix = str(resume_file_path or "").lower()
-                            kind = "tex" if suffix.endswith(".tex") else "pdf"
-                            cursor.execute(
-                                """
-                                INSERT INTO resumes (name, path, kind, created_at)
-                                VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
-                                """,
-                                (
-                                    resume_name,
-                                    resume_file_path or "",
-                                    kind,
-                                    application_date,
-                                ),
-                            )
-                            resume_id = cursor.lastrowid
-                        resume_ids[resume_name] = resume_id
-
-                cursor.execute(
-                    """
-                    INSERT INTO applications_new
-                        (id, job_id, application_date, resume_id,
-                         cover_letter_path, notes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        application_id,
-                        job_id,
-                        application_date,
-                        resume_id,
-                        cover_letter_path,
-                        notes,
-                    ),
-                )
-
-            migrated_count = cursor.execute(
-                "SELECT COUNT(*) FROM applications_new"
-            ).fetchone()[0]
-            if migrated_count != len(legacy_rows):
-                raise sqlite3.IntegrityError("Application migration row count mismatch")
-
-            cursor.execute("DROP TABLE applications")
-            cursor.execute("ALTER TABLE applications_new RENAME TO applications")
-            violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
-            if violations:
-                raise sqlite3.IntegrityError(
-                    f"Foreign key violations after application migration: {violations}"
-                )
-            self.conn.commit()
-            logger.info(
-                "Migrated %d applications and registered %d legacy resumes",
-                len(legacy_rows),
-                len(resume_ids),
-            )
+            apply_pending_migrations(self.conn)
         except Exception:
-            self.conn.rollback()
+            self.conn.close()
             raise
 
     def insert_job(self, job_data: dict[str, Any]) -> int:
